@@ -37,6 +37,7 @@ func NewServer(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger
 			logger:     logger,
 			signalChan: make(chan Signal, semaphoreLimit),
 			writeChan:  make(chan []byte, semaphoreLimit),
+			verifyChan: make(chan struct{}),
 			tcpBufferPool: &sync.Pool{
 				New: func() any {
 					buf := make([]byte, tcpDataBufSize)
@@ -213,10 +214,6 @@ func (s *Server) initTunnelPool() error {
 
 // tunnelHandshake 与客户端进行HTTP握手
 func (s *Server) tunnelHandshake() error {
-	if s.tlsCode == "1" || s.tlsCode == "2" {
-		s.verifyChan = make(chan struct{})
-	}
-
 	var clientIP string
 	done := make(chan struct{})
 
