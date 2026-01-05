@@ -1031,7 +1031,7 @@ func (c *Common) setControlConn() error {
 	}()
 
 	if c.tlsCode == "1" {
-		c.logger.Info("TLS code-1: certificate fingerprint verifying...")
+		c.logger.Info("TLS code-1: RAM cert fingerprint verifying...")
 	}
 	return nil
 }
@@ -1594,7 +1594,7 @@ func (c *Common) outgoingVerify(signal Signal) {
 		return
 	}
 
-	c.logger.Info("TLS code-1: certificate fingerprint verified: %v", fingerPrint)
+	c.logger.Info("TLS code-1: RAM cert fingerprint verified: %v", fingerPrint)
 
 	// 通知验证完成
 	c.verifyChan <- struct{}{}
