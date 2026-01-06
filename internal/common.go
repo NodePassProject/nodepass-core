@@ -52,6 +52,7 @@ type Common struct {
 	targetTCPAddrs   []*net.TCPAddr     // 目标TCP地址组
 	targetUDPAddrs   []*net.UDPAddr     // 目标UDP地址组
 	targetIdx        uint64             // 目标地址索引
+	lbStrategy       string             // 负载均衡策略
 	targetListener   *net.TCPListener   // 目标监听器
 	tunnelListener   net.Listener       // 隧道监听器
 	controlConn      net.Conn           // 隧道控制连接
@@ -156,6 +157,7 @@ const (
 	defaultMinPool       = 64                    // 默认最小池容量
 	defaultMaxPool       = 1024                  // 默认最大池容量
 	defaultServerName    = "none"                // 默认服务器名称
+	defaultLBStrategy    = "0"                   // 默认负载均衡策略
 	defaultRunMode       = "0"                   // 默认运行模式
 	defaultPoolType      = "0"                   // 默认连接池类型
 	defaultDialerIP      = "auto"                // 默认拨号本地IP
@@ -461,7 +463,16 @@ func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Co
 	}
 
 	// 多目标地址：负载均衡 + 故障转移
-	startIdx := c.nextTargetIdx()
+	var startIdx int
+	switch c.lbStrategy {
+	case "1":
+		// 策略1：粘性故障转移
+		startIdx = int(atomic.LoadUint64(&c.targetIdx) % uint64(addrCount))
+	default:
+		// 策略0：轮询故障转移
+		startIdx = c.nextTargetIdx()
+	}
+
 	var lastErr error
 	for i := range addrCount {
 		addr := getAddr((startIdx + i) % addrCount)
@@ -470,6 +481,9 @@ func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Co
 		}
 		conn, err := tryDial(addr)
 		if err == nil {
+			if c.lbStrategy == "1" && i > 0 {
+				atomic.StoreUint64(&c.targetIdx, uint64((startIdx+i)%addrCount))
+			}
 			return conn, nil
 		}
 		lastErr = err
@@ -596,6 +610,15 @@ func (c *Common) getServerName() {
 	}
 	if c.serverName == "" || net.ParseIP(c.serverName) != nil {
 		c.serverName = defaultServerName
+	}
+}
+
+// getLBStrategy 获取负载均衡策略
+func (c *Common) getLBStrategy() {
+	if lbStrategy := c.parsedURL.Query().Get("lbs"); lbStrategy != "" {
+		c.lbStrategy = lbStrategy
+	} else {
+		c.lbStrategy = defaultLBStrategy
 	}
 }
 
@@ -735,6 +758,7 @@ func (c *Common) initConfig() error {
 	c.getTunnelKey()
 	c.getPoolCapacity()
 	c.getServerName()
+	c.getLBStrategy()
 	c.getRunMode()
 	c.getPoolType()
 	c.getDialerIP()
