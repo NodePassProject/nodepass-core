@@ -692,11 +692,31 @@ nodepass "client://127.0.0.1:1080/app1.local:8080,app2.local:8080?mode=1"
 
 ### Rotation Strategy
 
-NodePass employs a Round-Robin algorithm that combines failover and load balancing features:
+NodePass provides two load balancing strategies controlled by the `lbs` parameter:
 
+**Strategy 0 (Round-Robin):**
 - **Load Balancing**: After each successful connection establishment, automatically switches to the next target address for even traffic distribution
 - **Failover**: When a connection to an address fails, immediately tries the next address to ensure service availability
 - **Automatic Recovery**: Failed addresses are retried in subsequent rotation cycles and automatically resume receiving traffic after recovery
+
+**Strategy 1 (Sticky Failover):**
+- **Connection Stickiness**: Continues using the current target address as long as connections succeed
+- **Failover Only**: Switches to the next address only when connection failures occur
+- **Persistent Target**: Once switched to a new address, all subsequent connections use that address until it fails
+
+Example configurations:
+
+```bash
+# Round-robin (lbs=0, cycles through targets on each connection)
+nodepass "server://0.0.0.0:10101/backend1:8080,backend2:8080,backend3:8080?lbs=0"
+
+# Sticky failover (lbs=1, stays on current target until failure)
+nodepass "server://0.0.0.0:10101/backend1:8080,backend2:8080,backend3:8080?lbs=1"
+```
+
+Choose the appropriate strategy based on your needs:
+- **Use lbs=0** for even load distribution across all backends
+- **Use lbs=1** for session persistence and reduced backend switching
 
 ### Use Cases
 
@@ -743,6 +763,7 @@ NodePass allows flexible configuration via URL query parameters. The following t
 | `key` | Custom key path | N/A | File path | O | X | O |
 | `dns` | DNS cache TTL | `5m` | `30s`/`5m`/`1h` etc. | O | O | X |
 | `sni` | Server Name Indication | `none` | Hostname | X | O | X |
+| `lbs` | Load balancing strategy | `0` | `0`/`1` | O | O | X |
 | `min` | Minimum pool capacity | `64` | Positive integer | X | O | X |
 | `max` | Maximum pool capacity | `1024` | Positive integer | O | X | X |
 | `mode` | Run mode control | `0` | `0`/`1`/`2` | O | O | X |
