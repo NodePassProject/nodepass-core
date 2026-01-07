@@ -52,6 +52,7 @@ type Common struct {
 	targetTCPAddrs   []*net.TCPAddr     // 目标TCP地址组
 	targetUDPAddrs   []*net.UDPAddr     // 目标UDP地址组
 	targetIdx        uint64             // 目标地址索引
+	lastFallback     uint64             // 上次回落时间
 	lbStrategy       string             // 负载均衡策略
 	targetListener   *net.TCPListener   // 目标监听器
 	tunnelListener   net.Listener       // 隧道监听器
@@ -145,6 +146,7 @@ var (
 	minPoolInterval  = getEnvAsDuration("NP_MIN_POOL_INTERVAL", 100*time.Millisecond) // 最小池间隔
 	maxPoolInterval  = getEnvAsDuration("NP_MAX_POOL_INTERVAL", 1*time.Second)        // 最大池间隔
 	reportInterval   = getEnvAsDuration("NP_REPORT_INTERVAL", 5*time.Second)          // 报告间隔
+	fallbackInterval = getEnvAsDuration("NP_FALLBACK_INTERVAL", 5*time.Minute)        // 回落间隔
 	serviceCooldown  = getEnvAsDuration("NP_SERVICE_COOLDOWN", 3*time.Second)         // 服务冷却时间
 	shutdownTimeout  = getEnvAsDuration("NP_SHUTDOWN_TIMEOUT", 5*time.Second)         // 关闭超时
 	ReloadInterval   = getEnvAsDuration("NP_RELOAD_INTERVAL", 1*time.Hour)            // 重载间隔
@@ -468,6 +470,15 @@ func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Co
 	case "1":
 		// 策略1：粘性故障转移
 		startIdx = int(atomic.LoadUint64(&c.targetIdx) % uint64(addrCount))
+	case "2":
+		// 策略2：主备故障转移
+		now := uint64(time.Now().UnixNano())
+		last := atomic.LoadUint64(&c.lastFallback)
+		if now-last > uint64(fallbackInterval) {
+			atomic.StoreUint64(&c.lastFallback, now)
+			atomic.StoreUint64(&c.targetIdx, 0)
+		}
+		startIdx = int(atomic.LoadUint64(&c.targetIdx) % uint64(addrCount))
 	default:
 		// 策略0：轮询故障转移
 		startIdx = c.nextTargetIdx()
@@ -475,14 +486,15 @@ func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Co
 
 	var lastErr error
 	for i := range addrCount {
-		addr := getAddr((startIdx + i) % addrCount)
+		targetIdx := (startIdx + i) % addrCount
+		addr := getAddr(targetIdx)
 		if addr == "" {
 			continue
 		}
 		conn, err := tryDial(addr)
 		if err == nil {
-			if c.lbStrategy == "1" && i > 0 {
-				atomic.StoreUint64(&c.targetIdx, uint64((startIdx+i)%addrCount))
+			if i > 0 && (c.lbStrategy == "1" || c.lbStrategy == "2") {
+				atomic.StoreUint64(&c.targetIdx, uint64(targetIdx))
 			}
 			return conn, nil
 		}
