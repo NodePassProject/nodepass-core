@@ -692,7 +692,7 @@ nodepass "client://127.0.0.1:1080/app1.local:8080,app2.local:8080?mode=1"
 
 ### 轮询策略
 
-NodePass提供两种负载均衡策略，通过 `lbs` 参数控制：
+NodePass提供三种负载均衡策略，通过 `lbs` 参数控制：
 
 **策略0（轮询故障转移）：**
 - **负载均衡**：每次成功建立连接后，自动切换到下一个目标地址，实现流量均匀分布
@@ -704,6 +704,12 @@ NodePass提供两种负载均衡策略，通过 `lbs` 参数控制：
 - **失败切换**：只有当连接失败时才切换到下一个地址
 - **目标持久**：切换到新地址后，后续所有连接都使用该地址直到失败
 
+**策略2（主备故障转移）：**
+- **主备优先**：首个目标地址主用，后续目标地址备用，按顺序优先级递减
+- **故障转移**：主目标地址失败时按顺序尝试备用地址，成功后保持粘性
+- **定时回落**：每隔固定时间自动尝试回落到主用目标地址
+- **智能降级**：回落失败时自动选择可用的最高优先级备用目标地址
+
 配置示例：
 
 ```bash
@@ -712,11 +718,19 @@ nodepass "server://0.0.0.0:10101/backend1:8080,backend2:8080,backend3:8080?lbs=0
 
 # 粘性故障转移（lbs=1，成功时保持当前目标）
 nodepass "server://0.0.0.0:10101/backend1:8080,backend2:8080,backend3:8080?lbs=1"
+
+# 主备故障转移（lbs=2，首目标优先且定时回落）
+nodepass "server://0.0.0.0:10101/primary:8080,backup1:8080,backup2:8080?lbs=2"
+
+# 自定义回落间隔为2分钟
+export NP_FALLBACK_INTERVAL=2m
+nodepass "server://0.0.0.0:10101/main.com:443,spare1.com:443,spare2.com:443?lbs=2"
 ```
 
 根据实际需求选择合适的策略：
 - **使用 lbs=0** 实现所有后端的均匀负载分布
 - **使用 lbs=1** 减少后端切换，保持会话粘性
+- **使用 lbs=2** 主备模式，故障消除自动回切
 
 ### 使用场景
 
@@ -763,7 +777,7 @@ NodePass支持通过URL查询参数进行灵活配置,不同参数在 server、c
 | `key` | 自定义密钥路径 | N/A | 文件路径 | O | X | O |
 | `dns` | DNS缓存TTL | `5m` | `30s`/`5m`/`1h`等 | O | O | X |
 | `sni` | 主机名指示 | `none` | 主机名 | X | O | X |
-| `lbs` | 负载均衡策略 | `0` | `0`/`1` | O | O | X |
+| `lbs` | 负载均衡策略 | `0` | `0`/`1`/`2` | O | O | X |
 | `min` | 最小连接池容量 | `64` | 正整数 | X | O | X |
 | `max` | 最大连接池容量 | `1024` | 正整数 | O | X | X |
 | `mode` | 运行模式控制 | `0` | `0`/`1`/`2` | O | O | X |
@@ -808,6 +822,7 @@ NodePass支持通过URL查询参数进行灵活配置,不同参数在 server、c
 | `NP_MIN_POOL_INTERVAL` | 连接创建之间的最小间隔 | 100ms | `export NP_MIN_POOL_INTERVAL=200ms` |
 | `NP_MAX_POOL_INTERVAL` | 连接创建之间的最大间隔 | 1s | `export NP_MAX_POOL_INTERVAL=3s` |
 | `NP_REPORT_INTERVAL` | 健康检查报告间隔 | 5s | `export NP_REPORT_INTERVAL=10s` |
+| `NP_FALLBACK_INTERVAL` | 回落故障转移间隔 | 5m | `export NP_FALLBACK_INTERVAL=2m` |
 | `NP_SERVICE_COOLDOWN` | 重启尝试前的冷却期 | 3s | `export NP_SERVICE_COOLDOWN=5s` |
 | `NP_SHUTDOWN_TIMEOUT` | 优雅关闭超时 | 5s | `export NP_SHUTDOWN_TIMEOUT=10s` |
 | `NP_RELOAD_INTERVAL` | 证书重载/状态备份间隔 | 1h | `export NP_RELOAD_INTERVAL=30m` |

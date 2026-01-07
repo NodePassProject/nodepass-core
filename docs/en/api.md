@@ -1588,7 +1588,7 @@ Examples:
 | `key` | Private key path | File path | None | Server only |
 | `dns` | DNS cache duration | Time duration (e.g., `5m`, `30s`, `1h`) | `5m` | Both |
 | `sni` | Server Name Indication | Hostname | `none` | Client dual-end handshake mode only |
-| `lbs` | Load balancing strategy | `0`(round-robin), `1`(sticky failover) | `0` | Both | 
+| `lbs` | Load balancing strategy | `0`(round-robin), `1`(sticky-failover), `2`(primary-backup) | `0` | Both | 
 | `min` | Minimum pool capacity | Integer > 0 | `64` | Client dual-end handshake mode only |
 | `max` | Maximum pool capacity | Integer > 0 | `1024` | Dual-end handshake mode |
 | `mode` | Runtime mode control | `0`(auto), `1`(force mode 1), `2`(force mode 2) | `0` | Both |
