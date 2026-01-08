@@ -699,10 +699,11 @@ NodePass provides three load balancing strategies controlled by the `lbs` parame
 - **Failover**: When a connection to an address fails, immediately tries the next address to ensure service availability
 - **Automatic Recovery**: Failed addresses are retried in subsequent rotation cycles and automatically resume receiving traffic after recovery
 
-**Strategy 1 (Sticky-Failover):**
-- **Connection Stickiness**: Continues using the current target address as long as connections succeed
-- **Failover Only**: Switches to the next address only when connection failures occur
-- **Persistent Target**: Once switched to a new address, all subsequent connections use that address until it fails
+**Strategy 1 (Optimal-Latency):**
+- **Intelligent Routing**: Periodically probes targets and automatically selects the one with the lowest latency for connections.
+- **Sticky Selection**: Once the optimal target is chosen, subsequent connections within the cycle preferentially use that target.
+- **Automatic Filtering**: Unhealthy targets are automatically excluded from routing and re-evaluated only after recovery.
+- **Failover**: If the optimal target fails, other targets are tried in order to ensure successful connections.
 
 **Strategy 2 (Primary-Backup):**
 - **Priority-Based**: Always attempts to connect to the first address (primary); only uses backups when primary fails
@@ -716,7 +717,7 @@ Example configurations:
 # Round-robin (lbs=0, cycles through targets on each connection)
 nodepass "server://0.0.0.0:10101/backend1:8080,backend2:8080,backend3:8080?lbs=0"
 
-# Sticky failover (lbs=1, stays on current target until failure)
+# Optimal-latency (lbs=1, automatically routes to fastest target)
 nodepass "server://0.0.0.0:10101/backend1:8080,backend2:8080,backend3:8080?lbs=1"
 
 # Primary-backup (lbs=2, primary priority and scheduled fallback)
@@ -729,7 +730,7 @@ nodepass "server://0.0.0.0:10101/main.com:443,spare1.com:443,spare2.com:443?lbs=
 
 Choose the appropriate strategy based on your needs:
 - **Use lbs=0** for even load distribution across all backends
-- **Use lbs=1** for session persistence and reduced backend switching
+- **Use lbs=1** for intelligent routing to the lowest latency target
 - **Use lbs=2** for primary-backup scenarios with automatic failback
 
 ### Use Cases
