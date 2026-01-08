@@ -53,6 +53,7 @@ type Common struct {
 	targetUDPAddrs   []*net.UDPAddr     // 目标UDP地址组
 	targetIdx        uint64             // 目标地址索引
 	lastFallback     uint64             // 上次回落时间
+	bestLatency      int32              // 最佳延迟毫秒
 	lbStrategy       string             // 负载均衡策略
 	targetListener   *net.TCPListener   // 目标监听器
 	tunnelListener   net.Listener       // 隧道监听器
@@ -420,6 +421,49 @@ func (c *Common) nextTargetIdx() int {
 	return int((atomic.AddUint64(&c.targetIdx, 1) - 1) % uint64(len(c.targetTCPAddrs)))
 }
 
+// probeBestTarget 探测并更新最优目标
+func (c *Common) probeBestTarget() int {
+	count := len(c.targetTCPAddrs)
+	if count == 0 {
+		return 0
+	}
+
+	// 并发探测
+	type result struct{ idx, lat int }
+	results := make(chan result, count)
+	for i := range count {
+		go func(idx int) { results <- result{idx, c.tcpPing(idx)} }(i)
+	}
+
+	// 收集结果
+	bestIdx, bestLat := 0, 0
+	for range count {
+		if r := <-results; r.lat > 0 && (bestLat == 0 || r.lat < bestLat) {
+			bestIdx, bestLat = r.idx, r.lat
+		}
+	}
+
+	// 更新最优
+	if bestLat > 0 {
+		atomic.StoreUint64(&c.targetIdx, uint64(bestIdx))
+		atomic.StoreInt32(&c.bestLatency, int32(bestLat))
+	}
+	return bestLat
+}
+
+// tcpPing 探测目标延迟毫秒
+func (c *Common) tcpPing(idx int) int {
+	addr, _ := c.resolveTarget("tcp", idx)
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+		start := time.Now()
+		if conn, err := net.DialTimeout("tcp", tcpAddr.String(), reportInterval); err == nil {
+			conn.Close()
+			return int(time.Since(start).Milliseconds())
+		}
+	}
+	return 0
+}
+
 // dialWithRotation 轮询拨号到目标地址组
 func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Conn, error) {
 	addrCount := len(c.targetAddrs)
@@ -464,14 +508,14 @@ func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Co
 		return nil, fmt.Errorf("dialWithRotation: invalid target address")
 	}
 
-	// 多目标地址：负载均衡 + 故障转移
+	// 多目标地址：组合策略
 	var startIdx int
 	switch c.lbStrategy {
 	case "1":
-		// 策略1：粘性故障转移
+		// 策略1：最优延迟
 		startIdx = int(atomic.LoadUint64(&c.targetIdx) % uint64(addrCount))
 	case "2":
-		// 策略2：主备故障转移
+		// 策略2：主备回落
 		now := uint64(time.Now().UnixNano())
 		last := atomic.LoadUint64(&c.lastFallback)
 		if now-last > uint64(fallbackInterval) {
@@ -480,7 +524,7 @@ func (c *Common) dialWithRotation(network string, timeout time.Duration) (net.Co
 		}
 		startIdx = int(atomic.LoadUint64(&c.targetIdx) % uint64(addrCount))
 	default:
-		// 策略0：轮询故障转移
+		// 策略0：轮询转移
 		startIdx = c.nextTargetIdx()
 	}
 
@@ -1171,6 +1215,11 @@ func (c *Common) healthCheck() error {
 			}
 
 			c.logger.Debug("Tunnel pool flushed: %v active connections", c.tunnelPool.Active())
+		}
+
+		// 探测最优目标
+		if c.lbStrategy == "1" && len(c.targetTCPAddrs) > 1 {
+			c.probeBestTarget()
 		}
 
 		// 发送PING信号
@@ -1872,22 +1921,8 @@ func (c *Common) singleEventLoop() error {
 	defer ticker.Stop()
 
 	for c.ctx.Err() == nil {
-		ping := 0
-		now := time.Now()
-
-		// 尝试连接到目标地址检测延迟
-		idx := c.nextTargetIdx()
-		if addr, _ := c.resolveTarget("tcp", idx); addr != nil {
-			if tcpAddr, ok := addr.(*net.TCPAddr); ok {
-				if conn, err := net.DialTimeout("tcp", tcpAddr.String(), reportInterval); err == nil {
-					ping = int(time.Since(now).Milliseconds())
-					conn.Close()
-				}
-			}
-		}
-
 		// 发送检查点事件
-		c.logger.Event("CHECK_POINT|MODE=%v|PING=%vms|POOL=0|TCPS=%v|UDPS=%v|TCPRX=%v|TCPTX=%v|UDPRX=%v|UDPTX=%v", c.runMode, ping,
+		c.logger.Event("CHECK_POINT|MODE=%v|PING=%vms|POOL=0|TCPS=%v|UDPS=%v|TCPRX=%v|TCPTX=%v|UDPRX=%v|UDPTX=%v", c.runMode, c.probeBestTarget(),
 			atomic.LoadInt32(&c.tcpSlot), atomic.LoadInt32(&c.udpSlot),
 			atomic.LoadUint64(&c.tcpRX), atomic.LoadUint64(&c.tcpTX),
 			atomic.LoadUint64(&c.udpRX), atomic.LoadUint64(&c.udpTX))
