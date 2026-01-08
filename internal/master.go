@@ -400,7 +400,7 @@ func (m *Master) Run() {
 		}
 		m.instances.Store(apiKeyID, apiKey)
 		m.saveState()
-		m.logger.Info("API Key created: %v", apiKey.URL)
+		fmt.Printf("%s  \033[32mINFO\033[0m  API Key created: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), apiKey.URL)
 	} else {
 		// 从API Key实例加载别名和主控ID
 		m.alias = apiKey.Alias
@@ -413,7 +413,7 @@ func (m *Master) Run() {
 		}
 		m.mid = apiKey.Config
 
-		m.logger.Info("API Key loaded: %v", apiKey.URL)
+		fmt.Printf("%s  \033[32mINFO\033[0m  API Key loaded: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), apiKey.URL)
 	}
 
 	// 设置HTTP路由
@@ -1346,7 +1346,7 @@ func (m *Master) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 func (m *Master) regenerateAPIKey(instance *Instance) {
 	instance.URL = generateAPIKey()
 	m.instances.Store(apiKeyID, instance)
-	m.logger.Info("API Key regenerated: %v", instance.URL)
+	fmt.Printf("%s  \033[32mINFO\033[0m  API Key regenerated: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), instance.URL)
 	go m.saveState()
 	go m.shutdownSSEConnections()
 }
