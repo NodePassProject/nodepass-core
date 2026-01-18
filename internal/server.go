@@ -233,15 +233,24 @@ func (s *Server) tunnelHandshake() error {
 		close(done)
 	})
 
-	server := &http.Server{Handler: handler}
-	go server.Serve(s.tunnelListener)
+	tlsConfig := s.tlsConfig
+	if tlsConfig == nil {
+		tlsConfig, _ = NewTLSConfig()
+	}
+
+	server := &http.Server{
+		Handler:   handler,
+		TLSConfig: tlsConfig,
+		ErrorLog:  s.logger.StdLogger(),
+	}
+	go server.ServeTLS(s.tunnelListener, "", "")
 
 	select {
 	case <-done:
 		server.Close()
 		s.clientIP = clientIP
 		if s.tlsCode == "1" {
-			if newTLSConfig, err := NewTLSConfig(""); err == nil {
+			if newTLSConfig, err := NewTLSConfig(); err == nil {
 				newTLSConfig.MinVersion = tls.VersionTLS13
 				s.tlsConfig = newTLSConfig
 				s.logger.Info("TLS code-1: RAM cert regenerated with TLS 1.3")

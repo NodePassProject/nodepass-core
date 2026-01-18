@@ -71,7 +71,7 @@ func createCore(parsedURL *url.URL, logger *logs.Logger) (interface{ Run() }, er
 }
 
 func getTLSProtocol(parsedURL *url.URL, logger *logs.Logger) (string, *tls.Config) {
-	tlsConfig, err := internal.NewTLSConfig(version)
+	tlsConfig, err := internal.NewTLSConfig()
 	if err != nil {
 		logger.Error("Generate TLS config failed: %v", err)
 		logger.Warn("TLS code-0: nil cert")

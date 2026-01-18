@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -224,16 +225,18 @@ func (c *Client) initTunnelPool() error {
 }
 
 func (c *Client) tunnelHandshake() error {
-	scheme := "http"
-	if c.serverPort == "443" {
-		scheme = "https"
-	}
-
-	req, _ := http.NewRequest(http.MethodGet, scheme+"://"+c.tunnelAddr+"/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "https://"+c.tunnelAddr+"/", nil)
 	req.Host = c.serverName
 	req.Header.Set("Authorization", "Bearer "+c.generateAuthToken())
 
-	client := &http.Client{}
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("tunnelHandshake: %w", err)
