@@ -197,45 +197,58 @@ func (s *Server) tunnelHandshake() error {
 	done := make(chan struct{})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Connection", "close")
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Connection", "close")
+			if r.URL.Path != "/" {
+				http.Error(w, "Not Found", http.StatusNotFound)
+				return
+			}
+
+			auth := r.Header.Get("Authorization")
+			if !strings.HasPrefix(auth, "Bearer ") || !s.verifyAuthToken(strings.TrimPrefix(auth, "Bearer ")) {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			clientIP = r.RemoteAddr
+			if host, _, err := net.SplitHostPort(clientIP); err == nil {
+				clientIP = host
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"flow": s.dataFlow,
+				"max":  s.maxPoolCapacity,
+				"tls":  s.tlsCode,
+				"type": s.poolType,
+			})
+
+			s.logger.Info("Sending tunnel config: FLOW=%v|MAX=%v|TLS=%v|TYPE=%v",
+				s.dataFlow, s.maxPoolCapacity, s.tlsCode, s.poolType)
+
+			close(done)
+		case http.MethodConnect:
+			if !s.verifyPreAuth(r) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			s.handlePreAuth(w, r)
+		default:
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
-		if r.URL.Path != "/" {
-			http.Error(w, "Not Found", http.StatusNotFound)
-			return
-		}
-
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || !s.verifyAuthToken(strings.TrimPrefix(auth, "Bearer ")) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		clientIP = r.RemoteAddr
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"flow": s.dataFlow,
-			"max":  s.maxPoolCapacity,
-			"tls":  s.tlsCode,
-			"type": s.poolType,
-		})
-
-		s.logger.Info("Sending tunnel config: FLOW=%v|MAX=%v|TLS=%v|TYPE=%v",
-			s.dataFlow, s.maxPoolCapacity, s.tlsCode, s.poolType)
-
-		close(done)
 	})
 
 	tlsConfig := s.tlsConfig
 	if tlsConfig == nil {
 		tlsConfig, _ = NewTLSConfig()
+	}
+
+	if len(tlsConfig.Certificates) > 0 && len(tlsConfig.Certificates[0].Certificate) > 0 {
+		fingerprint := s.formatCertFingerprint(tlsConfig.Certificates[0].Certificate[0])
+		s.logger.Info("TLS cert fingerprint for authorization: %v", fingerprint)
 	}
 
 	server := &http.Server{
