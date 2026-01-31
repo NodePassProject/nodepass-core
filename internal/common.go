@@ -34,6 +34,12 @@ import (
 )
 
 type Common struct {
+	targetIdx        uint64
+	lastFallback     uint64
+	tcpRX            uint64
+	tcpTX            uint64
+	udpRX            uint64
+	udpTX            uint64
 	parsedURL        *url.URL
 	logger           *logs.Logger
 	dnsCacheTTL      time.Duration
@@ -56,8 +62,6 @@ type Common struct {
 	targetAddrs      []string
 	targetTCPAddrs   []*net.TCPAddr
 	targetUDPAddrs   []*net.UDPAddr
-	targetIdx        uint64
-	lastFallback     uint64
 	bestLatency      int32
 	lbStrategy       string
 	targetListener   *net.TCPListener
@@ -90,10 +94,6 @@ type Common struct {
 	slotLimit        int32
 	tcpSlot          int32
 	udpSlot          int32
-	tcpRX            uint64
-	tcpTX            uint64
-	udpRX            uint64
-	udpTX            uint64
 	ctx              context.Context
 	cancel           context.CancelFunc
 }
