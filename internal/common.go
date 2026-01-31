@@ -20,6 +20,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -312,6 +313,40 @@ func (c *Common) generateAuthToken() string {
 
 func (c *Common) verifyAuthToken(token string) bool {
 	return hmac.Equal([]byte(token), []byte(c.generateAuthToken()))
+}
+
+func (c *Common) verifyPreAuth(r *http.Request) bool {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(r.Header.Get("Proxy-Authorization"), "Basic "))
+	return err == nil && strings.HasPrefix(string(decoded), c.tunnelKey+":")
+}
+
+func (c *Common) handlePreAuth(w http.ResponseWriter, r *http.Request) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		return
+	}
+	clientConn, _, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	defer clientConn.Close()
+
+	targetConn, err := net.DialTimeout("tcp", r.URL.Host, tcpDialTimeout)
+	if err != nil {
+		return
+	}
+	defer targetConn.Close()
+
+	clientConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+
+	buffer1 := c.getTCPBuffer()
+	buffer2 := c.getTCPBuffer()
+	defer func() {
+		c.putTCPBuffer(buffer1)
+		c.putTCPBuffer(buffer2)
+	}()
+
+	conn.DataExchange(clientConn, targetConn, c.readTimeout, buffer1, buffer2)
 }
 
 func (c *Common) encode(data []byte) []byte {
