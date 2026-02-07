@@ -583,5 +583,5 @@ If you encounter issues not covered in this guide:
 
 - Check the [project repository](https://github.com/NodePassProject/nodepass) for known issues
 - Increase the log level to `debug` for more detailed information
-- Review the [How It Works](/docs/en/how-it-works.md) section to better understand internal mechanisms
+- Review the [How It Works](/docs/how-it-works.md) section to better understand internal mechanisms
 - Consider joining the community discussion for assistance from other users

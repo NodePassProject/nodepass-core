@@ -41,7 +41,7 @@ Key components:
 
 - `/cmd/nodepass/`: Main application entry point and core dispatch logic
 - `/internal/`: Core implementation packages (server, client, master, common utilities)
-- `/docs/`: Comprehensive documentation in English and Chinese
+- `/docs/`: Comprehensive documentation in English
 - External dependencies: NodePassProject ecosystem libraries for certificates, connections, logging, and pooling
 
 ## Development Setup
@@ -133,7 +133,6 @@ We follow standard Go conventions with project-specific guidelines:
 - Use `gofmt` for consistent formatting and `go vet` to catch common errors
 - Follow the single responsibility principle and prefer composition over inheritance
 - Use descriptive variable and function names with proper Go naming conventions
-- Include both Chinese and English comments for public APIs (maintaining project tradition)
 - Implement proper error handling with context wrapping
 - Use the project's logging framework consistently with appropriate log levels
 - Protect shared state with mutexes and use channels for goroutine coordination
@@ -190,16 +189,13 @@ When adding tests:
 
 - **Write in clear, simple English**
 - **Include practical examples** for all features
-- **Maintain both English and Chinese versions** when possible
 - **Use consistent formatting** and structure
 - **Test all code examples** to ensure they work
 
 ### Documentation Structure
 
 - `README.md`: Project overview and quick start
-- `docs/en/`: English documentation
-- `docs/zh/`: Chinese documentation
-- Inline code comments for complex logic
+- `docs/`: Project documentation files
 - API documentation for master mode endpoints
 
 ### Contributing to Documentation

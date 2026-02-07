@@ -883,6 +883,6 @@ This setup:
 
 Now that you've seen various usage examples, you might want to:
 
-- Learn about [configuration options](/docs/en/configuration.md) for fine-tuning
-- Understand [how NodePass works](/docs/en/how-it-works.md) under the hood
-- Check the [troubleshooting guide](/docs/en/troubleshooting.md) for common issues
+- Learn about [configuration options](/docs/configuration.md) for fine-tuning
+- Understand [how NodePass works](/docs/how-it-works.md) under the hood
+- Check the [troubleshooting guide](/docs/troubleshooting.md) for common issues

@@ -675,6 +675,6 @@ NodePass, through its innovative architectural design and technical implementati
 
 ## Next Steps
 
-- For practical examples of deploying NodePass, see the [examples page](/docs/en/examples.md)
-- To fine-tune NodePass for your specific needs, explore the [configuration options](/docs/en/configuration.md)
-- If you encounter any issues, check the [troubleshooting guide](/docs/en/troubleshooting.md)
+- For practical examples of deploying NodePass, see the [examples page](/docs/examples.md)
+- To fine-tune NodePass for your specific needs, explore the [configuration options](/docs/configuration.md)
+- If you encounter any issues, check the [troubleshooting guide](/docs/troubleshooting.md)

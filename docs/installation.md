@@ -96,9 +96,9 @@ nodepass
 
 Now that you have NodePass installed, you can:
 
-- Learn about its basic [usage](/docs/en/usage.md)
-- Explore [configuration options](/docs/en/configuration.md)
-- Try out some [examples](/docs/en/examples.md)
+- Learn about its basic [usage](/docs/usage.md)
+- Explore [configuration options](/docs/configuration.md)
+- Try out some [examples](/docs/examples.md)
 
 ## Troubleshooting Installation Issues
 
@@ -108,4 +108,4 @@ If you encounter any issues during installation:
 - Check that you have the correct permissions to install software
 - For Go-related issues, verify your Go installation with `go version`
 - For container-related issues, ensure Docker is properly installed and running
-- See our [troubleshooting guide](/docs/en/troubleshooting.md) for more help
+- See our [troubleshooting guide](/docs/troubleshooting.md) for more help

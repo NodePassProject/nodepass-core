@@ -1000,7 +1000,7 @@ export NP_SHUTDOWN_TIMEOUT=3s
 
 ## Next Steps
 
-- See [usage instructions](/docs/en/usage.md) for basic operational commands
-- Explore [examples](/docs/en/examples.md) to understand deployment patterns
-- Learn about [how NodePass works](/docs/en/how-it-works.md) to optimize your configuration
-- Check the [troubleshooting guide](/docs/en/troubleshooting.md) if you encounter issues
+- See [usage instructions](/docs/usage.md) for basic operational commands
+- Explore [examples](/docs/examples.md) to understand deployment patterns
+- Learn about [how NodePass works](/docs/how-it-works.md) to optimize your configuration
+- Check the [troubleshooting guide](/docs/troubleshooting.md) if you encounter issues

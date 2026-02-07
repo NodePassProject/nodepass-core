@@ -1,4 +1,4 @@
-# NodePass API Reference
+# API Reference
 
 ## Overview
 
@@ -1601,3 +1601,13 @@ Examples:
 | `block` | Protocol blocking | `0`(disabled), `1`(SOCKS), `2`(HTTP), `3`(TLS) | `0` | Both |
 | `notcp` | TCP support control | `0`(enabled), `1`(disabled) | `0` | Both |
 | `noudp` | UDP support control | `0`(enabled), `1`(disabled) | `0` | Both |
+
+## Related Documentation
+
+- [Configuration Options](/docs/configuration.md)
+- [Usage Examples](/docs/examples.md)
+- [How NodePass Works](/docs/how-it-works.md)
+- [Installation Guide](/docs/installation.md)
+- [MCP Integration](/docs/mcp.md)
+- [Troubleshooting Guide](/docs/troubleshooting.md)
+- [Usage Instructions](/docs/usage.md)

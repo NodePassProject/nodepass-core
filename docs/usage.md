@@ -386,7 +386,7 @@ This design ensures that only clients with the correct key can establish tunnel 
 
 ## Next Steps
 
-- Learn about [configuration options](/docs/en/configuration.md) to fine-tune NodePass
-- Explore [examples](/docs/en/examples.md) of common deployment scenarios
-- Understand [how NodePass works](/docs/en/how-it-works.md) under the hood
-- Check the [troubleshooting guide](/docs/en/troubleshooting.md) if you encounter issues
+- Learn about [configuration options](/docs/configuration.md) to fine-tune NodePass
+- Explore [examples](/docs/examples.md) of common deployment scenarios
+- Understand [how NodePass works](/docs/how-it-works.md) under the hood
+- Check the [troubleshooting guide](/docs/troubleshooting.md) if you encounter issues
