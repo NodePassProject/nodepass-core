@@ -1535,6 +1535,38 @@ func (m *Master) stopInstance(instance *Instance) {
 	m.sendSSEEvent("update", instance)
 }
 
+func generateID() string {
+	bytes := make([]byte, 4)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
+func generateMID() string {
+	bytes := make([]byte, 8)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
+func generateAPIKey() string {
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
+func httpError(w http.ResponseWriter, message string, statusCode int) {
+	setCorsHeaders(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, data any) {
+	setCorsHeaders(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(data)
+}
+
 func (m *Master) enhanceURL(instanceURL string, instanceType string) string {
 	parsedURL, err := url.Parse(instanceURL)
 	if err != nil {
@@ -1682,36 +1714,77 @@ func (m *Master) generateConfigURL(instance *Instance) string {
 	return parsedURL.String()
 }
 
-func generateID() string {
-	bytes := make([]byte, 4)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
+func (m *Master) setInstanceURL(instance *Instance, updates map[string]string) error {
+	parsedURL, err := url.Parse(instance.URL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
 
-func generateMID() string {
-	bytes := make([]byte, 8)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
+	query := parsedURL.Query()
 
-func generateAPIKey() string {
-	bytes := make([]byte, 16)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
+	for key, value := range updates {
+		switch key {
+		case "type":
+			if value != "client" && value != "server" {
+				return fmt.Errorf("invalid type: must be 'client' or 'server'")
+			}
+			parsedURL.Scheme = value
+			instance.Type = value
+		case "password":
+			if value == "" {
+				parsedURL.User = nil
+			} else {
+				parsedURL.User = url.User(value)
+			}
+		case "tunnel_address":
+			parsedURL.Host = value + ":" + parsedURL.Port()
+		case "tunnel_port":
+			parsedURL.Host = parsedURL.Hostname() + ":" + value
+		case "target_address", "target_port":
+			pathParts := strings.Split(strings.Trim(parsedURL.Path, "/"), ":")
+			if key == "target_address" {
+				pathParts[0] = value
+			} else if len(pathParts) > 1 {
+				pathParts[1] = value
+			} else {
+				pathParts = append(pathParts, value)
+			}
+			parsedURL.Path = "/" + strings.Join(pathParts, ":")
+		case "targets":
+			parsedURL.Path = "/" + value
+		default:
+			if value == "" {
+				query.Del(key)
+			} else {
+				query.Set(key, value)
+			}
+		}
+	}
 
-func httpError(w http.ResponseWriter, message string, statusCode int) {
-	setCorsHeaders(w)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
+	parsedURL.RawQuery = query.Encode()
+	newURL := parsedURL.String()
 
-func writeJSON(w http.ResponseWriter, statusCode int, data any) {
-	setCorsHeaders(w)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+	if newURL == instance.URL {
+		return fmt.Errorf("no changes detected")
+	}
+
+	if instance.Status != "stopped" {
+		m.stopInstance(instance)
+		time.Sleep(baseDuration)
+	}
+
+	instance.URL = newURL
+	instance.Config = m.generateConfigURL(instance)
+	instance.Status = "stopped"
+	m.instances.Store(instance.ID, instance)
+
+	go m.startInstance(instance)
+	go func() {
+		time.Sleep(baseDuration)
+		m.saveState()
+	}()
+
+	return nil
 }
 
 func (m *Master) handleMCP(w http.ResponseWriter, r *http.Request) {
@@ -1806,7 +1879,7 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 		},
 		{
 			"name":        "update_instance",
-			"description": "Update instance configuration",
+			"description": "Update instance metadata (alias, restart policy, tags)",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1817,11 +1890,6 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 					"alias": map[string]any{
 						"type":        "string",
 						"description": "New alias (optional)",
-					},
-					"action": map[string]any{
-						"type":        "string",
-						"description": "Action: start, stop, restart, reset (optional)",
-						"enum":        []string{"start", "stop", "restart", "reset"},
 					},
 					"restart": map[string]any{
 						"type":        "boolean",
@@ -1836,8 +1904,8 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			},
 		},
 		{
-			"name":        "replace_instance_url",
-			"description": "Replace instance URL",
+			"name":        "control_instance",
+			"description": "Control instance state (start, stop, restart, reset)",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1845,17 +1913,233 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 						"type":        "string",
 						"description": "Instance ID",
 					},
-					"url": map[string]any{
+					"action": map[string]any{
 						"type":        "string",
-						"description": "New instance URL",
+						"description": "Control action",
+						"enum":        []string{"start", "stop", "restart", "reset"},
 					},
 				},
-				"required": []string{"id", "url"},
+				"required": []string{"id", "action"},
 			},
 		},
 		{
-			"name":        "delete_instance",
-			"description": "Delete an instance",
+			"name":        "set_instance_basic",
+			"description": "Set instance basic configuration (type, tunnel/target addresses, log level)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"type": map[string]any{
+						"type":        "string",
+						"description": "Instance type: server or client (optional)",
+						"enum":        []string{"server", "client"},
+					},
+					"tunnel_address": map[string]any{
+						"type":        "string",
+						"description": "Tunnel address (optional)",
+					},
+					"tunnel_port": map[string]any{
+						"type":        "string",
+						"description": "Tunnel port (optional)",
+					},
+					"target_address": map[string]any{
+						"type":        "string",
+						"description": "Target address (optional)",
+					},
+					"target_port": map[string]any{
+						"type":        "string",
+						"description": "Target port (optional)",
+					},
+					"targets": map[string]any{
+						"type":        "string",
+						"description": "Multiple targets: host1:port1,host2:port2 (optional)",
+					},
+					"log": map[string]any{
+						"type":        "string",
+						"description": "Log level: none, debug, info, warn, error, event (optional)",
+						"enum":        []string{"none", "debug", "info", "warn", "error", "event"},
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "set_instance_security",
+			"description": "Set instance security and encryption settings (password, TLS mode, certificates, SNI)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"password": map[string]any{
+						"type":        "string",
+						"description": "Connection password (optional, empty to remove)",
+					},
+					"tls": map[string]any{
+						"type":        "string",
+						"description": "TLS mode: 0=none, 1=self-signed, 2=custom (server, optional)",
+						"enum":        []string{"0", "1", "2"},
+					},
+					"crt": map[string]any{
+						"type":        "string",
+						"description": "Certificate file path (for tls=2, optional)",
+					},
+					"key": map[string]any{
+						"type":        "string",
+						"description": "Key file path (for tls=2, optional)",
+					},
+					"sni": map[string]any{
+						"type":        "string",
+						"description": "SNI hostname (client, optional)",
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "set_instance_connection",
+			"description": "Set instance connection pool settings (mode, type, pool size limits)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"mode": map[string]any{
+						"type":        "string",
+						"description": "Connection mode: 0=auto, 1=reverse/single-end, 2=forward/dual-end (server/client, optional)",
+						"enum":        []string{"0", "1", "2"},
+					},
+					"type": map[string]any{
+						"type":        "string",
+						"description": "Pool type: 0=TCP, 1=QUIC, 2=WebSocket, 3=HTTP2 (server, optional)",
+						"enum":        []string{"0", "1", "2", "3"},
+					},
+					"min": map[string]any{
+						"type":        "string",
+						"description": "Minimum pool size (client, optional)",
+					},
+					"max": map[string]any{
+						"type":        "string",
+						"description": "Maximum pool size (server, optional)",
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "set_instance_network",
+			"description": "Set instance network tuning parameters (DNS TTL, source IP, timeouts, connection limits)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"dns": map[string]any{
+						"type":        "string",
+						"description": "DNS cache TTL (e.g., 5m, 1h, optional)",
+					},
+					"dial": map[string]any{
+						"type":        "string",
+						"description": "Outbound source IP address (optional)",
+					},
+					"read": map[string]any{
+						"type":        "string",
+						"description": "Read timeout (e.g., 30s, 5m, optional)",
+					},
+					"rate": map[string]any{
+						"type":        "string",
+						"description": "Bandwidth limit in Mbps (optional)",
+					},
+					"slot": map[string]any{
+						"type":        "string",
+						"description": "Maximum connection slots (optional)",
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "set_instance_protocol",
+			"description": "Set instance protocol control settings (TCP/UDP enable/disable, PROXY protocol v1)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"notcp": map[string]any{
+						"type":        "string",
+						"description": "Disable TCP: 0=enabled, 1=disabled (optional)",
+						"enum":        []string{"0", "1"},
+					},
+					"noudp": map[string]any{
+						"type":        "string",
+						"description": "Disable UDP: 0=enabled, 1=disabled (optional)",
+						"enum":        []string{"0", "1"},
+					},
+					"proxy": map[string]any{
+						"type":        "string",
+						"description": "PROXY protocol v1: 0=disabled, 1=enabled (optional)",
+						"enum":        []string{"0", "1"},
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "set_instance_traffic",
+			"description": "Set instance traffic control and load balancing (Protocol blocking, load balancing)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"block": map[string]any{
+						"type":        "string",
+						"description": "Block protocols: 1=SOCKS, 2=HTTP, 3=TLS, combine like '123' (optional)",
+					},
+					"lbs": map[string]any{
+						"type":        "string",
+						"description": "Load balancing: 0=round-robin, 1=optimal-latency, 2=primary-backup (optional)",
+						"enum":        []string{"0", "1", "2"},
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "set_instance_advanced",
+			"description": "Set instance advanced/custom parameters (any additional URL parameters)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+					"parameters": map[string]any{
+						"type":        "object",
+						"description": "Custom URL query parameters (key-value pairs)",
+					},
+				},
+				"required": []string{"id", "parameters"},
+			},
+		},
+		{
+			"name":        "get_instance_config",
+			"description": "Get instance configuration (structured config object)",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1868,8 +2152,22 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			},
 		},
 		{
-			"name":        "tcping",
-			"description": "Test TCP connectivity",
+			"name":        "delete_instance",
+			"description": "Delete an instance (stop and remove)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Instance ID",
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			"name":        "tcping_target",
+			"description": "Test TCP connectivity (host:port latency probe)",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1883,7 +2181,7 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 		},
 		{
 			"name":        "get_master_info",
-			"description": "Get master information",
+			"description": "Get master information (system stats, uptime, version)",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -1891,7 +2189,7 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 		},
 		{
 			"name":        "update_master_info",
-			"description": "Update master alias",
+			"description": "Update master alias (server name or label)",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2018,33 +2316,6 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			m.sendSSEEvent("update", instance)
 		}
 
-		if action, ok := params.Arguments["action"].(string); ok && action != "" {
-			validActions := map[string]bool{"start": true, "stop": true, "restart": true, "reset": true}
-			if !validActions[action] {
-				m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid action")
-				return
-			}
-			if action == "reset" {
-				instance.TCPRXReset = instance.TCPRX - instance.TCPRXBase
-				instance.TCPTXReset = instance.TCPTX - instance.TCPTXBase
-				instance.UDPRXReset = instance.UDPRX - instance.UDPRXBase
-				instance.UDPTXReset = instance.UDPTX - instance.UDPTXBase
-				instance.TCPRX = 0
-				instance.TCPTX = 0
-				instance.UDPRX = 0
-				instance.UDPTX = 0
-				instance.TCPRXBase = 0
-				instance.TCPTXBase = 0
-				instance.UDPRXBase = 0
-				instance.UDPTXBase = 0
-				m.instances.Store(id, instance)
-				go m.saveState()
-				m.sendSSEEvent("update", instance)
-			} else {
-				m.processInstanceAction(instance, action)
-			}
-		}
-
 		if restart, ok := params.Arguments["restart"].(bool); ok && instance.Restart != restart {
 			instance.Restart = restart
 			m.instances.Store(id, instance)
@@ -2076,11 +2347,11 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Updated instance %s", id)}},
 			"instance": instance,
 		})
-	case "replace_instance_url":
+	case "control_instance":
 		id, _ := params.Arguments["id"].(string)
-		newURL, _ := params.Arguments["url"].(string)
-		if id == "" || newURL == "" {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id and url are required")
+		action, _ := params.Arguments["action"].(string)
+		if id == "" || action == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id and action are required")
 			return
 		}
 		if id == apiKeyID {
@@ -2094,44 +2365,411 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			return
 		}
 
-		parsedURL, err := url.Parse(newURL)
-		if err != nil {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid URL format")
+		validActions := map[string]bool{"start": true, "stop": true, "restart": true, "reset": true}
+		if !validActions[action] {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid action")
 			return
 		}
 
-		instanceType := parsedURL.Scheme
-		if instanceType != "client" && instanceType != "server" {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid URL scheme")
-			return
+		if action == "reset" {
+			instance.TCPRXReset = instance.TCPRX - instance.TCPRXBase
+			instance.TCPTXReset = instance.TCPTX - instance.TCPTXBase
+			instance.UDPRXReset = instance.UDPRX - instance.UDPRXBase
+			instance.UDPTXReset = instance.UDPTX - instance.UDPTXBase
+			instance.TCPRX = 0
+			instance.TCPTX = 0
+			instance.UDPRX = 0
+			instance.UDPTX = 0
+			instance.TCPRXBase = 0
+			instance.TCPTXBase = 0
+			instance.UDPRXBase = 0
+			instance.UDPTXBase = 0
+			m.instances.Store(id, instance)
+			go m.saveState()
+			m.sendSSEEvent("update", instance)
+		} else {
+			m.processInstanceAction(instance, action)
 		}
-
-		enhancedURL := m.enhanceURL(newURL, instanceType)
-		if instance.URL == enhancedURL {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance URL conflict")
-			return
-		}
-
-		if instance.Status != "stopped" {
-			m.stopInstance(instance)
-			time.Sleep(baseDuration)
-		}
-
-		instance.URL = enhancedURL
-		instance.Type = instanceType
-		instance.Config = m.generateConfigURL(instance)
-		instance.Status = "stopped"
-		m.instances.Store(id, instance)
-
-		go m.startInstance(instance)
-		go func() {
-			time.Sleep(baseDuration)
-			m.saveState()
-		}()
 
 		m.writeMCPResponse(w, req.ID, map[string]any{
-			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Replaced URL for instance %s", id)}},
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Controlled instance %s: %s", id, action)}},
 			"instance": instance,
+		})
+	case "set_instance_basic":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		updates := make(map[string]string)
+		if instanceType, ok := params.Arguments["type"].(string); ok && instanceType != "" {
+			updates["type"] = instanceType
+		}
+		if password, ok := params.Arguments["password"].(string); ok {
+			updates["password"] = password
+		}
+		if tunnelAddr, ok := params.Arguments["tunnel_address"].(string); ok && tunnelAddr != "" {
+			updates["tunnel_address"] = tunnelAddr
+		}
+		if tunnelPort, ok := params.Arguments["tunnel_port"].(string); ok && tunnelPort != "" {
+			updates["tunnel_port"] = tunnelPort
+		}
+		if targetAddr, ok := params.Arguments["target_address"].(string); ok && targetAddr != "" {
+			updates["target_address"] = targetAddr
+		}
+		if targetPort, ok := params.Arguments["target_port"].(string); ok && targetPort != "" {
+			updates["target_port"] = targetPort
+		}
+		if targets, ok := params.Arguments["targets"].(string); ok && targets != "" {
+			updates["targets"] = targets
+		}
+		if logLevel, ok := params.Arguments["log"].(string); ok && logLevel != "" {
+			updates["log"] = logLevel
+		}
+
+		if len(updates) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "no updates provided")
+			return
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set basic configuration for instance %s", id)}},
+			"instance": instance,
+		})
+	case "set_instance_security":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		updates := make(map[string]string)
+		if password, ok := params.Arguments["password"].(string); ok {
+			updates["password"] = password
+		}
+		if tls, ok := params.Arguments["tls"].(string); ok && tls != "" {
+			updates["tls"] = tls
+		}
+		if crt, ok := params.Arguments["crt"].(string); ok {
+			updates["crt"] = crt
+		}
+		if key, ok := params.Arguments["key"].(string); ok {
+			updates["key"] = key
+		}
+		if sni, ok := params.Arguments["sni"].(string); ok {
+			updates["sni"] = sni
+		}
+
+		if len(updates) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "no updates provided")
+			return
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set security configuration for instance %s", id)}},
+			"instance": instance,
+		})
+	case "set_instance_connection":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		updates := make(map[string]string)
+		if mode, ok := params.Arguments["mode"].(string); ok && mode != "" {
+			updates["mode"] = mode
+		}
+		if poolType, ok := params.Arguments["type"].(string); ok && poolType != "" {
+			updates["type"] = poolType
+		}
+		if min, ok := params.Arguments["min"].(string); ok && min != "" {
+			updates["min"] = min
+		}
+		if max, ok := params.Arguments["max"].(string); ok && max != "" {
+			updates["max"] = max
+		}
+
+		if len(updates) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "no updates provided")
+			return
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set connection configuration for instance %s", id)}},
+			"instance": instance,
+		})
+	case "set_instance_network":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		updates := make(map[string]string)
+		if dns, ok := params.Arguments["dns"].(string); ok {
+			updates["dns"] = dns
+		}
+		if dial, ok := params.Arguments["dial"].(string); ok {
+			updates["dial"] = dial
+		}
+		if read, ok := params.Arguments["read"].(string); ok {
+			updates["read"] = read
+		}
+		if rate, ok := params.Arguments["rate"].(string); ok {
+			updates["rate"] = rate
+		}
+		if slot, ok := params.Arguments["slot"].(string); ok {
+			updates["slot"] = slot
+		}
+
+		if len(updates) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "no updates provided")
+			return
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set network tuning for instance %s", id)}},
+			"instance": instance,
+		})
+	case "set_instance_protocol":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		updates := make(map[string]string)
+		if notcp, ok := params.Arguments["notcp"].(string); ok {
+			updates["notcp"] = notcp
+		}
+		if noudp, ok := params.Arguments["noudp"].(string); ok {
+			updates["noudp"] = noudp
+		}
+		if proxy, ok := params.Arguments["proxy"].(string); ok {
+			updates["proxy"] = proxy
+		}
+
+		if len(updates) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "no updates provided")
+			return
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set protocol control for instance %s", id)}},
+			"instance": instance,
+		})
+	case "set_instance_traffic":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		updates := make(map[string]string)
+		if block, ok := params.Arguments["block"].(string); ok {
+			updates["block"] = block
+		}
+		if lbs, ok := params.Arguments["lbs"].(string); ok {
+			updates["lbs"] = lbs
+		}
+
+		if len(updates) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "no updates provided")
+			return
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set traffic control for instance %s", id)}},
+			"instance": instance,
+		})
+	case "set_instance_advanced":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+		if id == apiKeyID {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "forbidden: API Key")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		params, ok := params.Arguments["parameters"].(map[string]any)
+		if !ok || len(params) == 0 {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "parameters object is required")
+			return
+		}
+
+		updates := make(map[string]string)
+		for key, value := range params {
+			updates[key] = fmt.Sprintf("%v", value)
+		}
+
+		if err := m.setInstanceURL(instance, updates); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content":  []map[string]any{{"type": "text", "text": fmt.Sprintf("Set advanced parameters for instance %s", id)}},
+			"instance": instance,
+		})
+	case "get_instance_config":
+		id, _ := params.Arguments["id"].(string)
+		if id == "" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "id is required")
+			return
+		}
+
+		instance, ok := m.findInstance(id)
+		if !ok {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
+			return
+		}
+
+		parsedURL, err := url.Parse(instance.Config)
+		if err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "failed to parse config URL")
+			return
+		}
+
+		query := parsedURL.Query()
+		config := map[string]any{
+			"type": parsedURL.Scheme,
+		}
+
+		if parsedURL.User != nil {
+			if password, ok := parsedURL.User.Password(); ok {
+				config["password"] = password
+			} else if username := parsedURL.User.Username(); username != "" {
+				config["password"] = username
+			}
+		}
+
+		config["tunnel_address"] = parsedURL.Hostname()
+		config["tunnel_port"] = parsedURL.Port()
+
+		path := strings.Trim(parsedURL.Path, "/")
+		if strings.Contains(path, ",") {
+			config["targets"] = path
+		} else if path != "" {
+			parts := strings.Split(path, ":")
+			if len(parts) >= 1 {
+				config["target_address"] = parts[0]
+			}
+			if len(parts) >= 2 {
+				config["target_port"] = parts[1]
+			}
+		}
+
+		params := make(map[string]string)
+		for key := range query {
+			params[key] = query.Get(key)
+		}
+		if len(params) > 0 {
+			config["parameters"] = params
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Instance %s configuration retrieved", id)}},
+			"config":  config,
 		})
 	case "delete_instance":
 		id, _ := params.Arguments["id"].(string)
@@ -2163,7 +2801,7 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 		m.writeMCPResponse(w, req.ID, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Deleted instance %s", id)}},
 		})
-	case "tcping":
+	case "tcping_target":
 		target, _ := params.Arguments["target"].(string)
 		if target == "" {
 			m.writeMCPError(w, req.ID, -32602, "Invalid params", "target is required")
