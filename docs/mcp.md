@@ -272,7 +272,7 @@ Get detailed instance information.
 
 ## Available Tools
 
-NodePass provides 9 MCP tools covering all instance and master management operations:
+NodePass provides 17 MCP tools covering all instance and master management operations:
 
 ### Instance Management
 
@@ -341,14 +341,37 @@ Create a new NodePass instance.
 }
 ```
 
+#### 4. control_instance
+
+Control instance state with actions (start, stop, restart, reset).
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `action` (string, required): Control action - `start`, `stop`, `restart`, `reset`
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "control_instance",
+    "arguments": {
+      "id": "abc123",
+      "action": "restart"
+    }
+  }
+}
+```
+
 #### 4. update_instance
 
-Update instance configuration.
+Update instance metadata (alias, restart policy, tags).
 
 **Arguments**:
 - `id` (string, required): Instance ID
 - `alias` (string, optional): New alias
-- `action` (string, optional): Control action (start, stop, restart, reset)
 - `restart` (boolean, optional): Auto-restart policy
 - `tags` (object, optional): Metadata tags
 
@@ -363,7 +386,6 @@ Update instance configuration.
     "arguments": {
       "id": "abc123",
       "alias": "New Name",
-      "action": "restart",
       "restart": true,
       "tags": {
         "env": "production",
@@ -374,13 +396,13 @@ Update instance configuration.
 }
 ```
 
-#### 5. replace_instance_url
+#### 5. control_instance
 
-Replace instance URL (reconnects the instance).
+Control instance state with actions (start, stop, restart, reset).
 
 **Arguments**:
 - `id` (string, required): Instance ID
-- `url` (string, required): New instance URL
+- `action` (string, required): Control action - `start`, `stop`, `restart`, `reset`
 
 **Example**:
 ```json
@@ -389,16 +411,297 @@ Replace instance URL (reconnects the instance).
   "id": 5,
   "method": "tools/call",
   "params": {
-    "name": "replace_instance_url",
+    "name": "control_instance",
     "arguments": {
       "id": "abc123",
-      "url": "client://new-server.example.com:443/127.0.0.1:22"
+      "action": "restart"
     }
   }
 }
 ```
 
-#### 6. delete_instance
+**Reset Action**: Resets traffic statistics (TCPRX, TCPTX, UDPRX, UDPTX) to zero while preserving the instance.
+
+#### 6. set_instance_basic
+
+Set instance basic configuration (type, tunnel/target addresses, log level).
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `type` (string, optional): Instance type (`server` or `client`)
+- `tunnel_address` (string, optional): Tunnel bind/server IP address
+- `tunnel_port` (string, optional): Tunnel bind/server port
+- `target_address` (string, optional): Single target IP address
+- `target_port` (string, optional): Single target port
+- `targets` (string, optional): Multiple targets in format `host1:port1,host2:port2`
+- `log` (string, optional): Log level - `none`, `debug`, `info`, `warn`, `error`, `event`
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_basic",
+    "arguments": {
+      "id": "abc123",
+      "tunnel_port": "10102",
+      "target_address": "192.168.1.100",
+      "target_port": "3389",
+      "log": "debug"
+    }
+  }
+}
+```
+
+**Multiple Targets Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_basic",
+    "arguments": {
+      "id": "abc123",
+      "targets": "10.0.1.10:8080,10.0.1.11:8080,10.0.1.12:8080"
+    }
+  }
+}
+```
+
+#### 7. set_instance_security
+
+Set instance security and encryption settings (password, TLS mode, certificates).
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `password` (string, optional): Connection password (empty string to remove)
+- `tls` (string, optional): TLS mode - `0` (none), `1` (self-signed), `2` (custom cert)
+- `crt` (string, optional): Certificate file path (required when `tls=2`)
+- `key` (string, optional): Private key file path (required when `tls=2`)
+- `sni` (string, optional): SNI hostname for client TLS verification
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_security",
+    "arguments": {
+      "id": "abc123",
+      "password": "my-secret-password",
+      "tls": "2",
+      "crt": "/etc/nodepass/cert.pem",
+      "key": "/etc/nodepass/key.pem"
+    }
+  }
+}
+```
+
+#### 8. set_instance_connection
+
+Set instance connection pool configuration.
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `mode` (string, optional): Connection mode - `0` (auto), `1` (single-end), `2` (dual-end)
+- `type` (string, optional): Pool type - `0` (TCP), `1` (QUIC), `2` (WebSocket), `3` (HTTP/2)
+- `min` (string, optional): Minimum pool size (client instances only)
+- `max` (string, optional): Maximum pool size (server instances only)
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_connection",
+    "arguments": {
+      "id": "abc123",
+      "mode": "2",
+      "type": "1",
+      "min": "128"
+    }
+  }
+}
+```
+
+#### 9. set_instance_network
+
+Set instance network tuning parameters.
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `dns` (string, optional): DNS cache TTL (e.g., `5m`, `1h`, `30s`)
+- `dial` (string, optional): Outbound source IP address for connections
+- `read` (string, optional): Data read timeout (e.g., `30s`, `5m`)
+- `rate` (string, optional): Bandwidth rate limit in Mbps
+- `slot` (string, optional): Maximum concurrent connection slots
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_network",
+    "arguments": {
+      "id": "abc123",
+      "dns": "10m",
+      "rate": "100",
+      "slot": "5000"
+    }
+  }
+}
+```
+
+#### 10. set_instance_protocol
+
+Set instance protocol control settings.
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `notcp` (string, optional): Disable TCP - `0` (enabled), `1` (disabled)
+- `noudp` (string, optional): Disable UDP - `0` (enabled), `1` (disabled)
+- `proxy` (string, optional): PROXY protocol - `0` (disabled), `1` (enabled)
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_protocol",
+    "arguments": {
+      "id": "abc123",
+      "noudp": "1",
+      "proxy": "1"
+    }
+  }
+}
+```
+
+#### 11. set_instance_traffic
+
+Set instance traffic control and load balancing.
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `block` (string, optional): Block protocols - `1` (SOCKS), `2` (HTTP), `3` (TLS), combine like `123`
+- `lbs` (string, optional): Load balancing strategy - `0` (round-robin), `1` (random), `2` (least-connections)
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_traffic",
+    "arguments": {
+      "id": "abc123",
+      "block": "23",
+      "lbs": "2"
+    }
+  }
+}
+```
+
+#### 12. set_instance_advanced
+
+Set instance advanced or custom parameters not covered by specific tools.
+
+**Arguments**:
+- `id` (string, required): Instance ID
+- `parameters` (object, required): Key-value pairs of custom URL query parameters
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 12,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_advanced",
+    "arguments": {
+      "id": "abc123",
+      "parameters": {
+        "custom_param": "value",
+        "timeout": "60s"
+      }
+    }
+  }
+}
+```
+
+#### 13. get_instance_config
+
+Get instance configuration in structured format.
+
+**Arguments**:
+- `id` (string, required): Instance ID
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "method": "tools/call",
+  "params": {
+    "name": "get_instance_config",
+    "arguments": {
+      "id": "abc123"
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Instance abc123 configuration retrieved"
+      }
+    ],
+    "config": {
+      "type": "server",
+      "tunnel_address": "0.0.0.0",
+      "tunnel_port": "8080",
+      "target_address": "localhost",
+      "target_port": "3000",
+      "parameters": {
+        "log": "info",
+        "tls": "1",
+        "dns": "5m",
+        "max": "1024",
+        "mode": "0",
+        "type": "0",
+        "dial": "auto",
+        "read": "1h",
+        "rate": "100",
+        "slot": "65536",
+        "proxy": "0",
+        "notcp": "0",
+        "noudp": "0"
+      }
+    }
+  }
+}
+```
+
+#### 14. delete_instance
 
 Delete an instance.
 
@@ -409,7 +712,7 @@ Delete an instance.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 6,
+  "id": 14,
   "method": "tools/call",
   "params": {
     "name": "delete_instance",
@@ -422,7 +725,7 @@ Delete an instance.
 
 ### Network Tools
 
-#### 7. tcping
+#### 15. tcping_target
 
 Test TCP connectivity to a target.
 
@@ -433,10 +736,10 @@ Test TCP connectivity to a target.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 7,
+  "id": 15,
   "method": "tools/call",
   "params": {
-    "name": "tcping",
+    "name": "tcping_target",
     "arguments": {
       "target": "example.com:443"
     }
@@ -446,7 +749,7 @@ Test TCP connectivity to a target.
 
 ### Master Management
 
-#### 8. get_master_info
+#### 16. get_master_info
 
 Get master node information (CPU, memory, network, uptime, etc.).
 
@@ -456,7 +759,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 8,
+  "id": 16,
   "method": "tools/call",
   "params": {
     "name": "get_master_info",
@@ -469,7 +772,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 8,
+  "id": 16,
   "result": {
     "content": [
       {
@@ -492,7 +795,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
 }
 ```
 
-#### 9. update_master_info
+#### 17. update_master_info
 
 Update master node alias.
 
@@ -503,7 +806,7 @@ Update master node alias.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 9,
+  "id": 17,
   "method": "tools/call",
   "params": {
     "name": "update_master_info",
@@ -513,6 +816,102 @@ Update master node alias.
   }
 }
 ```
+
+## Tool Design Philosophy
+
+### Fine-Grained Configuration Updates
+
+NodePass MCP tools follow a **domain-driven design** approach, organizing instance configuration updates into logical categories. This design provides several benefits:
+
+1. **Precision**: Update only what you need without affecting other settings
+2. **Safety**: Reduce risk of unintended configuration changes
+3. **Clarity**: Tool names clearly indicate what they modify
+4. **Composability**: Combine multiple tool calls for complex configurations
+5. **Validation**: Each tool validates only relevant parameters
+
+### Configuration Categories
+
+Instance configuration tools are organized by functional domain:
+
+| Tool | Domain | Purpose |
+|------|--------|---------|
+| `update_instance` | Metadata | Alias, tags, restart policy |
+| `control_instance` | State Control | Start, stop, restart, reset |
+| `set_instance_basic` | Addressing | Type, tunnel/target addresses, log level |
+| `set_instance_security` | Encryption | Password, TLS mode, certificates, SNI |
+| `set_instance_connection` | Connection Pool | Mode, type, pool size limits |
+| `set_instance_network` | Network Tuning | DNS cache, source IP, timeouts, rate limits |
+| `set_instance_protocol` | Protocol Control | TCP/UDP enable/disable, PROXY protocol |
+| `set_instance_traffic` | Traffic Control | Protocol blocking, load balancing |
+| `set_instance_advanced` | Custom Parameters | Any additional URL parameters |
+| `get_instance_config` | Configuration Query | Retrieve current configuration in structured format |
+
+### Best Practices
+
+#### Single Concern Updates
+
+Update one configuration domain at a time for clarity and safety:
+
+```json
+// Good: Set only network tuning
+{
+  "name": "set_instance_network",
+  "arguments": {
+    "id": "abc123",
+    "rate": "100",
+    "slot": "5000"
+  }
+}
+
+// Good: Separate security configuration
+{
+  "name": "set_instance_security",
+  "arguments": {
+    "id": "abc123",
+    "tls": "2",
+    "crt": "/path/to/cert.pem",
+    "key": "/path/to/key.pem"
+  }
+}
+```
+
+#### Sequential Tool Calls
+
+For complex reconfigurations, make multiple sequential calls:
+
+```json
+// Step 1: Set addresses
+{"name": "set_instance_basic", "arguments": {"id": "abc123", "tunnel_port": "10102"}}
+
+// Step 2: Enable TLS
+{"name": "set_instance_security", "arguments": {"id": "abc123", "tls": "1"}}
+
+// Step 3: Tune network
+{"name": "set_instance_network", "arguments": {"id": "abc123", "rate": "100"}}
+
+// Step 4: Restart to apply
+{"name": "control_instance", "arguments": {"id": "abc123", "action": "restart"}}
+```
+
+#### Parameter Validation
+
+Each update tool performs domain-specific validation:
+
+- **Basic**: Validates address formats and port ranges
+- **Security**: Checks TLS mode compatibility and certificate paths
+- **Connection**: Validates mode/type combinations
+- **Network**: Verifies timeout formats and numeric limits
+- **Protocol**: Ensures valid enable/disable flags
+- **Traffic**: Validates block codes and LBS strategies
+
+### Backward Compatibility
+
+The new fine-grained tools are designed to:
+
+- **Coexist**: Work alongside existing metadata updates (`update_instance`)
+- **Restart automatically**: Changes trigger instance restart only when needed
+- **Preserve config**: Unmodified parameters remain unchanged
+- **Fail gracefully**: Invalid updates return clear error messages
 
 ## Resources
 
@@ -615,6 +1014,155 @@ curl -X POST "$API_URL" \
   }'
 ```
 
+## Practical Use Cases
+
+### Use Case 1: Migrate Instance to New Server
+
+Scenario: Move a tunnel to a different server with enhanced security.
+
+```bash
+INSTANCE_ID="abc123"
+
+# Step 1: Update basic configuration (new tunnel server)
+curl -X POST "$API_URL" -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" -d '{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_basic",
+    "arguments": {
+      "id": "'$INSTANCE_ID'",
+      "tunnel_address": "new-server.example.com",
+      "tunnel_port": "443"
+    }
+  }
+}'
+
+# Step 2: Enable TLS with custom certificates
+curl -X POST "$API_URL" -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" -d '{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_security",
+    "arguments": {
+      "id": "'$INSTANCE_ID'",
+      "tls": "2",
+      "crt": "/etc/nodepass/prod.crt",
+      "key": "/etc/nodepass/prod.key",
+      "sni": "new-server.example.com"
+    }
+  }
+}'
+
+# Step 3: Optimize network settings
+curl -X POST "$API_URL" -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" -d '{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_network",
+    "arguments": {
+      "id": "'$INSTANCE_ID'",
+      "dns": "1h",
+      "rate": "500",
+      "slot": "10000"
+    }
+  }
+}'
+```
+
+### Use Case 2: Configure Load Balanced Backend
+
+Scenario: Set up a client to connect to multiple backend servers with load balancing.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_basic",
+    "arguments": {
+      "id": "xyz789",
+      "targets": "10.0.1.10:8080,10.0.1.11:8080,10.0.1.12:8080"
+    }
+  }
+}
+
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_traffic",
+    "arguments": {
+      "id": "xyz789",
+      "lbs": "2",
+      "block": "23"
+    }
+  }
+}
+```
+
+### Use Case 3: Apply Network Restrictions
+
+Scenario: Lock down an instance to TCP-only with PROXY protocol.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_protocol",
+    "arguments": {
+      "id": "def456",
+      "noudp": "1",
+      "proxy": "1"
+    }
+  }
+}
+```
+
+### Use Case 4: Performance Tuning for High-Traffic Instance
+
+Scenario: Optimize connection pool and network settings for high-throughput scenario.
+
+```json
+// Step 1: Upgrade to QUIC with larger pool
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_connection",
+    "arguments": {
+      "id": "high-traffic-01",
+      "mode": "2",
+      "type": "1",
+      "min": "256"
+    }
+  }
+}
+
+// Step 2: Increase rate limit and slots
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "set_instance_network",
+    "arguments": {
+      "id": "high-traffic-01",
+      "rate": "1000",
+      "slot": "50000",
+      "dns": "30m"
+    }
+  }
+}
+```
+
 ## Python Client Example
 
 ```python
@@ -671,26 +1219,103 @@ class NodePassMCP:
             args['alias'] = alias
         return self.call_tool('create_instance', args)
     
+    def set_instance_basic(self, instance_id, **kwargs):
+        """Set basic configuration (type, addresses, log level)"""
+        args = {'id': instance_id}
+        args.update(kwargs)
+        return self.call_tool('set_instance_basic', args)
+    
+    def set_instance_security(self, instance_id, **kwargs):
+        """Set security settings (password, TLS, certificates, SNI)"""
+        args = {'id': instance_id}
+        args.update(kwargs)
+        return self.call_tool('set_instance_security', args)
+    
+    def set_instance_connection(self, instance_id, **kwargs):
+        """Set connection pool settings"""
+        args = {'id': instance_id}
+        args.update(kwargs)
+        return self.call_tool('set_instance_connection', args)
+    
+    def set_instance_network(self, instance_id, **kwargs):
+        """Set network tuning parameters"""
+        args = {'id': instance_id}
+        args.update(kwargs)
+        return self.call_tool('set_instance_network', args)
+    
+    def set_instance_protocol(self, instance_id, **kwargs):
+        """Set protocol control settings"""
+        args = {'id': instance_id}
+        args.update(kwargs)
+        return self.call_tool('set_instance_protocol', args)
+    
+    def set_instance_traffic(self, instance_id, **kwargs):
+        """Set traffic control and load balancing"""
+        args = {'id': instance_id}
+        args.update(kwargs)
+        return self.call_tool('set_instance_traffic', args)
+    
     def get_master_info(self):
         return self.call_tool('get_master_info')
 
-# Usage
+# Usage Example 1: Basic instance creation and configuration
 client = NodePassMCP('https://localhost:8443/api', 'your-api-key')
 
-# Initialize
-print(client.initialize())
+# Initialize connection
+client.initialize()
 
-# List instances
-print(client.list_instances())
-
-# Create instance
-print(client.create_instance(
-    'client://server.example.com:443/127.0.0.1:22',
+# Create a new instance
+result = client.create_instance(
+    'client://server.example.com:10101/127.0.0.1:22',
     'SSH Tunnel'
-))
+)
+instance_id = result['result']['instance']['id']
 
-# Get master info
-print(client.get_master_info())
+# Configure the instance step by step
+# 1. Enable TLS security
+client.set_instance_security(
+    instance_id,
+    tls='1',
+    sni='server.example.com'
+)
+
+# 2. Optimize network settings
+client.set_instance_network(
+    instance_id,
+    dns='1h',
+    rate='100',
+    slot='5000'
+)
+
+# 3. Configure connection pool
+client.set_instance_connection(
+    instance_id,
+    mode='2',
+    type='1',
+    min='128'
+)
+
+# Usage Example 2: Migrate instance to load-balanced backends
+client.set_instance_basic(
+    instance_id,
+    targets='10.0.1.10:8080,10.0.1.11:8080,10.0.1.12:8080'
+)
+
+client.set_instance_traffic(
+    instance_id,
+    lbs='2'  # Least connections
+)
+
+# Usage Example 3: Restrict protocols
+client.set_instance_protocol(
+    instance_id,
+    noudp='1',
+    proxy='1'
+)
+
+# Get master system information
+info = client.get_master_info()
+print(f"Master uptime: {info['result']['info']['uptime']}s")
 ```
 
 ## Integration with AI Assistants
