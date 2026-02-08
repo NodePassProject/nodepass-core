@@ -60,6 +60,7 @@ Explore the complete documentation to learn more about NodePass:
 - [Usage Instructions](/docs/usage.md)
 - [Configuration Options](/docs/configuration.md)
 - [API Reference](/docs/api.md)
+- [MCP Integration](/docs/mcp.md)
 - [Examples](/docs/examples.md)
 - [How It Works](/docs/how-it-works.md)
 - [Troubleshooting](/docs/troubleshooting.md)
