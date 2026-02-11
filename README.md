@@ -52,6 +52,11 @@
   - One-click deployment scripts, easy management.
   - Real-time monitoring, API-instance management, traffic stats.
 
+- **AI-Powered Integration**
+  - Model Context Protocol (MCP) 2.0 support for AI assistant integration.
+  - JSON-RPC 2.0 interface with 17 comprehensive management tools.
+  - Compatible with Claude, GPT, and other AI platforms.
+
 ## Documentation
 
 Explore the complete documentation to learn more about NodePass:
