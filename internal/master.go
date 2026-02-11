@@ -30,12 +30,10 @@ import (
 
 const (
 	defaultAPIPath    = "/api"
-	openAPIVersion    = "v1"
-	nextMCPVersion    = "v2"
-	mcpVersion        = "2025-11-25"
-	mcpResourceScheme = "nodepass"
-	mcpResourceType   = "instance"
-	stateFilePath     = "gob"
+	openAPIVersion = "v1"
+	nextMCPVersion = "v2"
+	mcpVersion     = "2025-11-25"
+	stateFilePath  = "gob"
 	stateFileName     = "nodepass.gob"
 	sseRetryTime      = 3000
 	apiKeyID          = "********"
@@ -180,10 +178,6 @@ type MCPResponse struct {
 type MCPToolCallParams struct {
 	Name      string         `json:"name"`
 	Arguments map[string]any `json:"arguments,omitempty"`
-}
-
-type MCPResourceParams struct {
-	URI string `json:"uri"`
 }
 
 func (m *Master) handleTCPing(w http.ResponseWriter, r *http.Request) {
@@ -1811,10 +1805,6 @@ func (m *Master) handleMCP(w http.ResponseWriter, r *http.Request) {
 		m.handleMCPToolsList(w, req)
 	case "tools/call":
 		m.handleMCPToolsCall(w, req)
-	case "resources/list":
-		m.handleMCPResourcesList(w, req)
-	case "resources/read":
-		m.handleMCPResourcesRead(w, req)
 	default:
 		m.writeMCPError(w, req.ID, -32601, "Method not found", req.Method)
 	}
@@ -1824,8 +1814,7 @@ func (m *Master) handleMCPInitialize(w http.ResponseWriter, req MCPRequest) {
 	result := map[string]any{
 		"protocolVersion": mcpVersion,
 		"capabilities": map[string]any{
-			"tools":     map[string]any{},
-			"resources": map[string]any{},
+			"tools": map[string]any{},
 		},
 		"serverInfo": map[string]any{
 			"name":    "NodePass Master",
@@ -2857,53 +2846,6 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 	default:
 		m.writeMCPError(w, req.ID, -32602, "Invalid params", "unknown tool")
 	}
-}
-
-func (m *Master) handleMCPResourcesList(w http.ResponseWriter, req MCPRequest) {
-	var resources []map[string]any
-	m.instances.Range(func(key, value any) bool {
-		instance := value.(*Instance)
-		if instance.ID != apiKeyID {
-			resources = append(resources, map[string]any{
-				"uri":         fmt.Sprintf("%s://%s/%s", mcpResourceScheme, mcpResourceType, instance.ID),
-				"name":        instance.Alias,
-				"description": fmt.Sprintf("%s instance: %s", instance.Type, instance.URL),
-				"mimeType":    "application/json",
-			})
-		}
-		return true
-	})
-	m.writeMCPResponse(w, req.ID, map[string]any{"resources": resources})
-}
-
-func (m *Master) handleMCPResourcesRead(w http.ResponseWriter, req MCPRequest) {
-	var params MCPResourceParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
-		return
-	}
-
-	uriPrefix := fmt.Sprintf("%s://%s/", mcpResourceScheme, mcpResourceType)
-	if !strings.HasPrefix(params.URI, uriPrefix) {
-		m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid URI scheme")
-		return
-	}
-
-	id := strings.TrimPrefix(params.URI, uriPrefix)
-	instance, ok := m.findInstance(id)
-	if !ok {
-		m.writeMCPError(w, req.ID, -32602, "Invalid params", "instance not found")
-		return
-	}
-
-	instanceJSON, _ := json.MarshalIndent(instance, "", "  ")
-	m.writeMCPResponse(w, req.ID, map[string]any{
-		"contents": []map[string]any{{
-			"uri":      params.URI,
-			"mimeType": "application/json",
-			"text":     string(instanceJSON),
-		}},
-	})
 }
 
 func (m *Master) writeMCPResponse(w http.ResponseWriter, id any, result any) {
