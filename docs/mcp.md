@@ -8,11 +8,11 @@ NodePass Master supports the [Model Context Protocol (MCP)](https://modelcontext
 |---------|---------------|-------------------|
 | **Path** | `/api/v1/*` | `/api/v2` |
 | **Protocol** | HTTP Methods | JSON-RPC 2.0 |
-| **Schema** | OpenAPI 3.0 | MCP Tools/Resources |
+| **Schema** | OpenAPI 3.0 | MCP Tools |
 | **Events** | SSE (Server-Sent Events) | Stateless (no events) |
 | **Client** | Browsers, curl, scripts | AI assistants (Claude, GPT, etc.) |
 | **Authentication** | API Key header | API Key header |
-| **Discovery** | `/openapi.json` | `initialize` + `tools/list` |
+| **Discovery** | `/openapi.json` | `tools/list` |
 
 ## Getting Started
 
@@ -120,8 +120,7 @@ Establish connection and negotiate protocol version.
   "result": {
     "protocolVersion": "2025-11-25",
     "capabilities": {
-      "tools": {},
-      "resources": {}
+      "tools": {}
     },
     "serverInfo": {
       "name": "NodePass Master",
@@ -196,74 +195,6 @@ Execute a specific tool.
       {
         "type": "text",
         "text": "Result description"
-      }
-    ]
-  }
-}
-```
-
-### 4. List Resources
-
-**Method**: `resources/list`
-
-Browse available instance resources.
-
-**Request**:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 4,
-  "method": "resources/list"
-}
-```
-
-**Response**:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 4,
-  "result": {
-    "resources": [
-      {
-        "uri": "nodepass://instance/abc123",
-        "name": "My Instance",
-        "description": "client instance: scheme://host:port",
-        "mimeType": "application/json"
-      }
-    ]
-  }
-}
-```
-
-### 5. Read Resource
-
-**Method**: `resources/read`
-
-Get detailed instance information.
-
-**Request**:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 5,
-  "method": "resources/read",
-  "params": {
-    "uri": "nodepass://instance/abc123"
-  }
-}
-```
-
-**Response**:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 5,
-  "result": {
-    "contents": [
-      {
-        "uri": "nodepass://instance/abc123",
-        "mimeType": "application/json",
-        "text": "{\"id\":\"abc123\",\"alias\":\"My Instance\",...}"
       }
     ]
   }
@@ -913,28 +844,6 @@ The new fine-grained tools are designed to:
 - **Preserve config**: Unmodified parameters remain unchanged
 - **Fail gracefully**: Invalid updates return clear error messages
 
-## Resources
-
-MCP resources provide a browsable view of all instances.
-
-### Resource URI Format
-
-```
-nodepass://instance/{instance_id}
-```
-
-Example: `nodepass://instance/abc123`
-
-### Browse Instances
-
-Use `resources/list` to get all instance URIs, then `resources/read` to fetch details.
-
-**Workflow**:
-```
-1. resources/list  → Get all instance URIs
-2. resources/read  → Read specific instance JSON
-```
-
 ## Complete Example
 
 Here's a complete workflow using curl:
@@ -1346,7 +1255,6 @@ Any MCP-compatible client can integrate:
 1. **Initialize**: Establish connection with `initialize` method
 2. **Discover**: Use `tools/list` to get available operations
 3. **Execute**: Call tools via `tools/call` method
-4. **Browse**: Use `resources/list` and `resources/read` for instance exploration
 
 ## Security Considerations
 
@@ -1467,9 +1375,9 @@ Delete instances when no longer needed:
 | Get instance | ✅ GET /instances/{id} | ✅ get_instance |
 | Create instance | ✅ POST /instances | ✅ create_instance |
 | Update instance | ✅ PATCH /instances/{id} | ✅ update_instance |
-| Replace URL | ✅ PUT /instances/{id} | ✅ replace_instance_url |
+| Replace URL | ✅ PUT /instances/{id} | ✅ set_instance_* |
 | Delete instance | ✅ DELETE /instances/{id} | ✅ delete_instance |
-| TCP ping | ✅ GET /tcping | ✅ tcping |
+| TCP ping | ✅ GET /tcping | ✅ tcping_target |
 | Get master info | ✅ GET /info | ✅ get_master_info |
 | Update master | ✅ POST /info | ✅ update_master_info |
 | Real-time events | ✅ GET /events (SSE) | ❌ Not needed |
