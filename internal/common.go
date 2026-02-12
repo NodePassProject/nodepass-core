@@ -287,17 +287,7 @@ func NewTLSConfig() (*tls.Config, error) {
 
 func (c *Common) formatCertFingerprint(certRaw []byte) string {
 	hash := sha256.Sum256(certRaw)
-	hashHex := hex.EncodeToString(hash[:])
-
-	var formatted strings.Builder
-	for i := 0; i < len(hashHex); i += 2 {
-		if i > 0 {
-			formatted.WriteByte(':')
-		}
-		formatted.WriteString(strings.ToUpper(hashHex[i : i+2]))
-	}
-
-	return "sha256:" + formatted.String()
+	return "sha256:" + hex.EncodeToString(hash[:])
 }
 
 func (c *Common) xor(data []byte) []byte {
