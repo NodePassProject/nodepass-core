@@ -250,13 +250,40 @@ Get details of a specific instance.
 
 #### 3. create_instance
 
-Create a new NodePass instance.
+Create a new NodePass instance with structured configuration.
 
-**Arguments**:
-- `url` (string, required): Instance URL (scheme://host:port/host:port)
-- `alias` (string, optional): Instance alias
+**Required Arguments**:
+- `role` (string): Instance role - `server` or `client`
+- `tunnel_port` (string): Tunnel port number
+- `target_port` (string): Target port number
 
-**Example**:
+**Optional Arguments**:
+- `alias` (string): Instance alias
+- `tunnel_address` (string): Tunnel address (defaults: `0.0.0.0` for server, `localhost` for client)
+- `target_address` (string): Target address (default: `localhost`)
+- `targets` (string): Multiple targets in format `host1:port1,host2:port2,...`
+- `password` (string): Connection password
+- `log` (string): Log level - `none`, `debug`, `info`, `warn`, `error`, `event`
+- `tls` (string): TLS mode - `0` (none), `1` (self-signed), `2` (custom, server only)
+- `crt` (string): Certificate file path (for tls=2)
+- `key` (string): Key file path (for tls=2)
+- `sni` (string): SNI hostname (client dual-end mode)
+- `dns` (string): DNS cache TTL (e.g., `5m`, `1h`)
+- `lbs` (string): Load balancing - `0` (round-robin), `1` (optimal-latency), `2` (primary-backup)
+- `mode` (string): Connection mode - `0` (auto), `1` (reverse/single-end), `2` (forward/dual-end)
+- `type` (string): Pool type - `0` (TCP), `1` (QUIC), `2` (WebSocket), `3` (HTTP2, server only)
+- `min` (string): Minimum pool size (client dual-end mode)
+- `max` (string): Maximum pool size (dual-end mode)
+- `dial` (string): Outbound source IP (default: auto)
+- `read` (string): Read timeout (e.g., `30s`, `5m`, `1h`)
+- `rate` (string): Bandwidth limit in Mbps (0=unlimited)
+- `slot` (string): Connection slots (0=unlimited)
+- `proxy` (string): PROXY protocol v1 - `0` (disabled), `1` (enabled)
+- `block` (string): Block protocols - `1` (SOCKS), `2` (HTTP), `3` (TLS), combine like `123`
+- `notcp` (string): Disable TCP - `0` (enabled), `1` (disabled)
+- `noudp` (string): Disable UDP - `0` (enabled), `1` (disabled)
+
+**Example** (basic client tunnel):
 ```json
 {
   "jsonrpc": "2.0",
@@ -265,32 +292,37 @@ Create a new NodePass instance.
   "params": {
     "name": "create_instance",
     "arguments": {
-      "url": "client://server.example.com:443/127.0.0.1:22",
-      "alias": "SSH Tunnel"
+      "alias": "SSH Tunnel",
+      "role": "client",
+      "tunnel_address": "server.example.com",
+      "tunnel_port": "443",
+      "target_address": "127.0.0.1",
+      "target_port": "22"
     }
   }
 }
 ```
 
-#### 4. control_instance
-
-Control instance state with actions (start, stop, restart, reset).
-
-**Arguments**:
-- `id` (string, required): Instance ID
-- `action` (string, required): Control action - `start`, `stop`, `restart`, `reset`
-
-**Example**:
+**Example** (advanced configuration):
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 4,
+  "id": 3,
   "method": "tools/call",
   "params": {
-    "name": "control_instance",
+    "name": "create_instance",
     "arguments": {
-      "id": "abc123",
-      "action": "restart"
+      "alias": "Production Web Server",
+      "role": "server",
+      "tunnel_port": "443",
+      "target_address": "127.0.0.1",
+      "target_port": "8080",
+      "log": "info",
+      "tls": "1",
+      "mode": "0",
+      "type": "0",
+      "rate": "100",
+      "slot": "5000"
     }
   }
 }
@@ -902,8 +934,14 @@ curl -X POST "$API_URL" \
     "params": {
       "name": "create_instance",
       "arguments": {
-        "url": "client://server.example.com:443/127.0.0.1:22",
-        "alias": "SSH Tunnel"
+        "alias": "SSH Tunnel",
+        "role": "client",
+        "tunnel_address": "server.example.com",
+        "tunnel_port": "443",
+        "target_address": "127.0.0.1",
+        "target_port": "22",
+        "log": "info",
+        "tls": "1"
       }
     }
   }'
@@ -1122,10 +1160,25 @@ class NodePassMCP:
     def list_instances(self):
         return self.call_tool('list_instances')
     
-    def create_instance(self, url, alias=None):
-        args = {'url': url}
-        if alias:
-            args['alias'] = alias
+    def create_instance(self, role, tunnel_port, target_port, **kwargs):
+        """Create a new instance with structured configuration
+        
+        Required:
+            role: 'server' or 'client'
+            tunnel_port: Tunnel port number
+            target_port: Target port number
+        
+        Optional (pass as kwargs):
+            alias, tunnel_address, target_address, targets, password,
+            log, tls, crt, key, sni, dns, lbs, mode, type, min, max,
+            dial, read, rate, slot, proxy, block, notcp, noudp
+        """
+        args = {
+            'role': role,
+            'tunnel_port': tunnel_port,
+            'target_port': target_port
+        }
+        args.update(kwargs)
         return self.call_tool('create_instance', args)
     
     def set_instance_basic(self, instance_id, **kwargs):
@@ -1175,8 +1228,14 @@ client.initialize()
 
 # Create a new instance
 result = client.create_instance(
-    'client://server.example.com:10101/127.0.0.1:22',
-    'SSH Tunnel'
+    role='client',
+    tunnel_port='10101',
+    target_port='22',
+    alias='SSH Tunnel',
+    tunnel_address='server.example.com',
+    target_address='127.0.0.1',
+    log='info',
+    tls='1'
 )
 instance_id = result['result']['instance']['id']
 
