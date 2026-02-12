@@ -29,18 +29,18 @@ import (
 )
 
 const (
-	defaultAPIPath    = "/api"
-	openAPIVersion = "v1"
-	nextMCPVersion = "v2"
-	mcpVersion     = "2025-11-25"
-	stateFilePath  = "gob"
-	stateFileName     = "nodepass.gob"
-	sseRetryTime      = 3000
-	apiKeyID          = "********"
-	tcpingSemLimit    = 10
-	baseDuration      = 100 * time.Millisecond
-	gracefulTimeout   = 5 * time.Second
-	maxValueLen       = 256
+	defaultAPIPath  = "/api"
+	openAPIVersion  = "v1"
+	nextMCPVersion  = "v2"
+	mcpVersion      = "2025-11-25"
+	stateFilePath   = "gob"
+	stateFileName   = "nodepass.gob"
+	sseRetryTime    = 3000
+	apiKeyID        = "********"
+	tcpingSemLimit  = 10
+	baseDuration    = 100 * time.Millisecond
+	gracefulTimeout = 5 * time.Second
+	maxValueLen     = 256
 )
 
 const swaggerUIHTML = `<!DOCTYPE html>
@@ -961,8 +961,8 @@ func (m *Master) handleInstances(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		instanceType := parsedURL.Scheme
-		if instanceType != "client" && instanceType != "server" {
+		instanceRole := parsedURL.Scheme
+		if instanceRole != "client" && instanceRole != "server" {
 			httpError(w, "Invalid URL scheme", http.StatusBadRequest)
 			return
 		}
@@ -976,8 +976,8 @@ func (m *Master) handleInstances(w http.ResponseWriter, r *http.Request) {
 		instance := &Instance{
 			ID:      id,
 			Alias:   reqData.Alias,
-			Type:    instanceType,
-			URL:     m.enhanceURL(reqData.URL, instanceType),
+			Type:    instanceRole,
+			URL:     m.enhanceURL(reqData.URL, instanceRole),
 			Status:  "stopped",
 			Restart: true,
 			Meta:    Meta{Tags: make(map[string]string)},
@@ -1175,13 +1175,13 @@ func (m *Master) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 
-	instanceType := parsedURL.Scheme
-	if instanceType != "client" && instanceType != "server" {
+	instanceRole := parsedURL.Scheme
+	if instanceRole != "client" && instanceRole != "server" {
 		httpError(w, "Invalid URL scheme", http.StatusBadRequest)
 		return
 	}
 
-	enhancedURL := m.enhanceURL(reqData.URL, instanceType)
+	enhancedURL := m.enhanceURL(reqData.URL, instanceRole)
 
 	if instance.URL == enhancedURL {
 		httpError(w, "Instance URL conflict", http.StatusConflict)
@@ -1194,7 +1194,7 @@ func (m *Master) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 	}
 
 	instance.URL = enhancedURL
-	instance.Type = instanceType
+	instance.Type = instanceRole
 	instance.Config = m.generateConfigURL(instance)
 
 	instance.Status = "stopped"
@@ -1561,7 +1561,7 @@ func writeJSON(w http.ResponseWriter, statusCode int, data any) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func (m *Master) enhanceURL(instanceURL string, instanceType string) string {
+func (m *Master) enhanceURL(instanceURL string, instanceRole string) string {
 	parsedURL, err := url.Parse(instanceURL)
 	if err != nil {
 		m.logger.Error("enhanceURL: invalid URL format: %v", err)
@@ -1574,7 +1574,7 @@ func (m *Master) enhanceURL(instanceURL string, instanceType string) string {
 		query.Set("log", m.logLevel)
 	}
 
-	if instanceType == "server" && m.tlsCode != "0" {
+	if instanceRole == "server" && m.tlsCode != "0" {
 		if query.Get("tls") == "" {
 			query.Set("tls", m.tlsCode)
 		}
@@ -1825,6 +1825,130 @@ func (m *Master) handleMCPInitialize(w http.ResponseWriter, req MCPRequest) {
 }
 
 func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
+	commonParams := map[string]map[string]any{
+		"id": {
+			"type":        "string",
+			"description": "Instance ID",
+		},
+		"alias": {
+			"type":        "string",
+			"description": "Instance alias",
+		},
+		"role": {
+			"type":        "string",
+			"description": "Instance role: server or client",
+			"enum":        []string{"server", "client"},
+		},
+		"tunnel_address": {
+			"type":        "string",
+			"description": "Tunnel address",
+		},
+		"tunnel_port": {
+			"type":        "string",
+			"description": "Tunnel port",
+		},
+		"target_address": {
+			"type":        "string",
+			"description": "Target address",
+		},
+		"target_port": {
+			"type":        "string",
+			"description": "Target port",
+		},
+		"targets": {
+			"type":        "string",
+			"description": "Multiple targets: host1:port1,host2:port2...",
+		},
+		"password": {
+			"type":        "string",
+			"description": "Connection password",
+		},
+		"log": {
+			"type":        "string",
+			"description": "Log level: none, debug, info, warn, error, event",
+			"enum":        []string{"none", "debug", "info", "warn", "error", "event"},
+		},
+		"tls": {
+			"type":        "string",
+			"description": "TLS mode: 0=none, 1=self-signed, 2=custom (server only)",
+			"enum":        []string{"0", "1", "2"},
+		},
+		"crt": {
+			"type":        "string",
+			"description": "Certificate file path (for tls=2)",
+		},
+		"key": {
+			"type":        "string",
+			"description": "Key file path (for tls=2)",
+		},
+		"sni": {
+			"type":        "string",
+			"description": "SNI hostname (client dual-end mode)",
+		},
+		"dns": {
+			"type":        "string",
+			"description": "DNS cache TTL (e.g., 5m, 1h)",
+		},
+		"lbs": {
+			"type":        "string",
+			"description": "Load balancing: 0=round-robin, 1=optimal-latency, 2=primary-backup",
+			"enum":        []string{"0", "1", "2"},
+		},
+		"mode": {
+			"type":        "string",
+			"description": "Connection mode: 0=auto, 1=reverse/single-end, 2=forward/dual-end",
+			"enum":        []string{"0", "1", "2"},
+		},
+		"type": {
+			"type":        "string",
+			"description": "Pool type: 0=TCP, 1=QUIC, 2=WebSocket, 3=HTTP2 (server only)",
+			"enum":        []string{"0", "1", "2", "3"},
+		},
+		"min": {
+			"type":        "string",
+			"description": "Minimum pool size (client dual-end mode)",
+		},
+		"max": {
+			"type":        "string",
+			"description": "Maximum pool size (dual-end mode)",
+		},
+		"dial": {
+			"type":        "string",
+			"description": "Outbound source IP (default: auto)",
+		},
+		"read": {
+			"type":        "string",
+			"description": "Read timeout (e.g., 30s, 5m, 1h)",
+		},
+		"rate": {
+			"type":        "string",
+			"description": "Bandwidth limit in Mbps (0=unlimited)",
+		},
+		"slot": {
+			"type":        "string",
+			"description": "Connection slots (0=unlimited)",
+		},
+		"proxy": {
+			"type":        "string",
+			"description": "PROXY protocol v1: 0=disabled, 1=enabled",
+			"enum":        []string{"0", "1"},
+		},
+		"block": {
+			"type":        "string",
+			"description": "Block protocols: 1=SOCKS, 2=HTTP, 3=TLS, combine like '123'",
+		},
+		"notcp": {
+			"type":        "string",
+			"description": "Disable TCP: 0=enabled, 1=disabled",
+			"enum":        []string{"0", "1"},
+		},
+		"noudp": {
+			"type":        "string",
+			"description": "Disable UDP: 0=enabled, 1=disabled",
+			"enum":        []string{"0", "1"},
+		},
+	}
+
 	tools := []map[string]any{
 		{
 			"name":        "list_instances",
@@ -1838,32 +1962,46 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"name":        "get_instance",
 			"description": "Get details of a specific instance",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-				},
-				"required": []string{"id"},
+				"type":       "object",
+				"properties": map[string]any{"id": commonParams["id"]},
+				"required":   []string{"id"},
 			},
 		},
 		{
 			"name":        "create_instance",
-			"description": "Create a new NodePass instance",
+			"description": "Create a new NodePass instance with structured configuration",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"url": map[string]any{
-						"type":        "string",
-						"description": "Instance URL (scheme://host:port/host:port)",
-					},
-					"alias": map[string]any{
-						"type":        "string",
-						"description": "Instance alias (optional)",
-					},
+					"alias":          commonParams["alias"],
+					"role":           commonParams["role"],
+					"tunnel_address": commonParams["tunnel_address"],
+					"tunnel_port":    commonParams["tunnel_port"],
+					"target_address": commonParams["target_address"],
+					"target_port":    commonParams["target_port"],
+					"targets":        commonParams["targets"],
+					"password":       commonParams["password"],
+					"log":            commonParams["log"],
+					"tls":            commonParams["tls"],
+					"crt":            commonParams["crt"],
+					"key":            commonParams["key"],
+					"sni":            commonParams["sni"],
+					"dns":            commonParams["dns"],
+					"lbs":            commonParams["lbs"],
+					"mode":           commonParams["mode"],
+					"type":           commonParams["type"],
+					"min":            commonParams["min"],
+					"max":            commonParams["max"],
+					"dial":           commonParams["dial"],
+					"read":           commonParams["read"],
+					"rate":           commonParams["rate"],
+					"slot":           commonParams["slot"],
+					"proxy":          commonParams["proxy"],
+					"block":          commonParams["block"],
+					"notcp":          commonParams["notcp"],
+					"noudp":          commonParams["noudp"],
 				},
-				"required": []string{"url"},
+				"required": []string{"role", "tunnel_port", "target_port"},
 			},
 		},
 		{
@@ -1872,21 +2010,15 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"alias": map[string]any{
-						"type":        "string",
-						"description": "New alias (optional)",
-					},
+					"id":    commonParams["id"],
+					"alias": commonParams["alias"],
 					"restart": map[string]any{
 						"type":        "boolean",
-						"description": "Auto-restart policy (optional)",
+						"description": "Auto-restart policy",
 					},
 					"tags": map[string]any{
 						"type":        "object",
-						"description": "Metadata tags (optional)",
+						"description": "Metadata tags",
 					},
 				},
 				"required": []string{"id"},
@@ -1898,10 +2030,7 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
+					"id": commonParams["id"],
 					"action": map[string]any{
 						"type":        "string",
 						"description": "Control action",
@@ -1913,44 +2042,18 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 		},
 		{
 			"name":        "set_instance_basic",
-			"description": "Set instance basic configuration (type, tunnel/target addresses, log level)",
+			"description": "Set instance basic configuration (role, tunnel/target addresses, log level)",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"type": map[string]any{
-						"type":        "string",
-						"description": "Instance type: server or client (optional)",
-						"enum":        []string{"server", "client"},
-					},
-					"tunnel_address": map[string]any{
-						"type":        "string",
-						"description": "Tunnel address (optional)",
-					},
-					"tunnel_port": map[string]any{
-						"type":        "string",
-						"description": "Tunnel port (optional)",
-					},
-					"target_address": map[string]any{
-						"type":        "string",
-						"description": "Target address (optional)",
-					},
-					"target_port": map[string]any{
-						"type":        "string",
-						"description": "Target port (optional)",
-					},
-					"targets": map[string]any{
-						"type":        "string",
-						"description": "Multiple targets: host1:port1,host2:port2 (optional)",
-					},
-					"log": map[string]any{
-						"type":        "string",
-						"description": "Log level: none, debug, info, warn, error, event (optional)",
-						"enum":        []string{"none", "debug", "info", "warn", "error", "event"},
-					},
+					"id":             commonParams["id"],
+					"role":           commonParams["role"],
+					"tunnel_address": commonParams["tunnel_address"],
+					"tunnel_port":    commonParams["tunnel_port"],
+					"target_address": commonParams["target_address"],
+					"target_port":    commonParams["target_port"],
+					"targets":        commonParams["targets"],
+					"log":            commonParams["log"],
 				},
 				"required": []string{"id"},
 			},
@@ -1961,31 +2064,12 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"password": map[string]any{
-						"type":        "string",
-						"description": "Connection password (optional, empty to remove)",
-					},
-					"tls": map[string]any{
-						"type":        "string",
-						"description": "TLS mode: 0=none, 1=self-signed, 2=custom (server, optional)",
-						"enum":        []string{"0", "1", "2"},
-					},
-					"crt": map[string]any{
-						"type":        "string",
-						"description": "Certificate file path (for tls=2, optional)",
-					},
-					"key": map[string]any{
-						"type":        "string",
-						"description": "Key file path (for tls=2, optional)",
-					},
-					"sni": map[string]any{
-						"type":        "string",
-						"description": "SNI hostname (client, optional)",
-					},
+					"id":       commonParams["id"],
+					"password": commonParams["password"],
+					"tls":      commonParams["tls"],
+					"crt":      commonParams["crt"],
+					"key":      commonParams["key"],
+					"sni":      commonParams["sni"],
 				},
 				"required": []string{"id"},
 			},
@@ -1996,28 +2080,11 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"mode": map[string]any{
-						"type":        "string",
-						"description": "Connection mode: 0=auto, 1=reverse/single-end, 2=forward/dual-end (server/client, optional)",
-						"enum":        []string{"0", "1", "2"},
-					},
-					"type": map[string]any{
-						"type":        "string",
-						"description": "Pool type: 0=TCP, 1=QUIC, 2=WebSocket, 3=HTTP2 (server, optional)",
-						"enum":        []string{"0", "1", "2", "3"},
-					},
-					"min": map[string]any{
-						"type":        "string",
-						"description": "Minimum pool size (client, optional)",
-					},
-					"max": map[string]any{
-						"type":        "string",
-						"description": "Maximum pool size (server, optional)",
-					},
+					"id":   commonParams["id"],
+					"mode": commonParams["mode"],
+					"type": commonParams["type"],
+					"min":  commonParams["min"],
+					"max":  commonParams["max"],
 				},
 				"required": []string{"id"},
 			},
@@ -2028,30 +2095,12 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"dns": map[string]any{
-						"type":        "string",
-						"description": "DNS cache TTL (e.g., 5m, 1h, optional)",
-					},
-					"dial": map[string]any{
-						"type":        "string",
-						"description": "Outbound source IP address (optional)",
-					},
-					"read": map[string]any{
-						"type":        "string",
-						"description": "Read timeout (e.g., 30s, 5m, optional)",
-					},
-					"rate": map[string]any{
-						"type":        "string",
-						"description": "Bandwidth limit in Mbps (optional)",
-					},
-					"slot": map[string]any{
-						"type":        "string",
-						"description": "Maximum connection slots (optional)",
-					},
+					"id":   commonParams["id"],
+					"dns":  commonParams["dns"],
+					"dial": commonParams["dial"],
+					"read": commonParams["read"],
+					"rate": commonParams["rate"],
+					"slot": commonParams["slot"],
 				},
 				"required": []string{"id"},
 			},
@@ -2062,25 +2111,10 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"notcp": map[string]any{
-						"type":        "string",
-						"description": "Disable TCP: 0=enabled, 1=disabled (optional)",
-						"enum":        []string{"0", "1"},
-					},
-					"noudp": map[string]any{
-						"type":        "string",
-						"description": "Disable UDP: 0=enabled, 1=disabled (optional)",
-						"enum":        []string{"0", "1"},
-					},
-					"proxy": map[string]any{
-						"type":        "string",
-						"description": "PROXY protocol v1: 0=disabled, 1=enabled (optional)",
-						"enum":        []string{"0", "1"},
-					},
+					"id":    commonParams["id"],
+					"notcp": commonParams["notcp"],
+					"noudp": commonParams["noudp"],
+					"proxy": commonParams["proxy"],
 				},
 				"required": []string{"id"},
 			},
@@ -2091,19 +2125,9 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-					"block": map[string]any{
-						"type":        "string",
-						"description": "Block protocols: 1=SOCKS, 2=HTTP, 3=TLS, combine like '123' (optional)",
-					},
-					"lbs": map[string]any{
-						"type":        "string",
-						"description": "Load balancing: 0=round-robin, 1=optimal-latency, 2=primary-backup (optional)",
-						"enum":        []string{"0", "1", "2"},
-					},
+					"id":    commonParams["id"],
+					"block": commonParams["block"],
+					"lbs":   commonParams["lbs"],
 				},
 				"required": []string{"id"},
 			},
@@ -2114,10 +2138,7 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
+					"id": commonParams["id"],
 					"parameters": map[string]any{
 						"type":        "object",
 						"description": "Custom URL query parameters (key-value pairs)",
@@ -2130,28 +2151,18 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			"name":        "get_instance_config",
 			"description": "Get instance configuration (structured config object)",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-				},
-				"required": []string{"id"},
+				"type":       "object",
+				"properties": map[string]any{"id": commonParams["id"]},
+				"required":   []string{"id"},
 			},
 		},
 		{
 			"name":        "delete_instance",
 			"description": "Delete an instance (stop and remove)",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Instance ID",
-					},
-				},
-				"required": []string{"id"},
+				"type":       "object",
+				"properties": map[string]any{"id": commonParams["id"]},
+				"required":   []string{"id"},
 			},
 		},
 		{
@@ -2228,24 +2239,54 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			"instance": instance,
 		})
 	case "create_instance":
-		instanceURL, _ := params.Arguments["url"].(string)
-		alias, _ := params.Arguments["alias"].(string)
-		if instanceURL == "" {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "url is required")
+		instanceRole, _ := params.Arguments["role"].(string)
+		if instanceRole != "server" && instanceRole != "client" {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "role must be 'server' or 'client'")
 			return
+		}
+
+		tunnelAddr, _ := params.Arguments["tunnel_address"].(string)
+		if tunnelAddr == "" {
+			tunnelAddr = map[string]string{"server": "", "client": ""}[instanceRole]
+		}
+
+		tunnelPort, _ := params.Arguments["tunnel_port"].(string)
+		targetPort, _ := params.Arguments["target_port"].(string)
+
+		var targetPath string
+		if targets, ok := params.Arguments["targets"].(string); ok && targets != "" {
+			targetPath = targets
+		} else {
+			targetAddr, _ := params.Arguments["target_address"].(string)
+			targetPath = fmt.Sprintf("%s:%s", targetAddr, targetPort)
+		}
+
+		var instanceURL string
+		if password, ok := params.Arguments["password"].(string); ok && password != "" {
+			instanceURL = fmt.Sprintf("%s://%s@%s:%s/%s", instanceRole, password, tunnelAddr, tunnelPort, targetPath)
+		} else {
+			instanceURL = fmt.Sprintf("%s://%s:%s/%s", instanceRole, tunnelAddr, tunnelPort, targetPath)
 		}
 
 		parsedURL, err := url.Parse(instanceURL)
 		if err != nil {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid URL format")
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", "failed to construct URL")
 			return
 		}
 
-		instanceType := parsedURL.Scheme
-		if instanceType != "client" && instanceType != "server" {
-			m.writeMCPError(w, req.ID, -32602, "Invalid params", "invalid URL scheme")
-			return
+		query := parsedURL.Query()
+		skipKeys := map[string]bool{"alias": true, "role": true, "tunnel_address": true, "tunnel_port": true, "target_address": true, "target_port": true, "targets": true, "password": true}
+		for key, val := range params.Arguments {
+			if skipKeys[key] {
+				continue
+			}
+			if strVal, ok := val.(string); ok && strVal != "" {
+				query.Set(key, strVal)
+			}
 		}
+
+		parsedURL.RawQuery = query.Encode()
+		instanceURL = parsedURL.String()
 
 		id := generateID()
 		if _, exists := m.instances.Load(id); exists {
@@ -2253,11 +2294,12 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			return
 		}
 
+		alias, _ := params.Arguments["alias"].(string)
 		instance := &Instance{
 			ID:      id,
 			Alias:   alias,
-			Type:    instanceType,
-			URL:     m.enhanceURL(instanceURL, instanceType),
+			Type:    instanceRole,
+			URL:     m.enhanceURL(instanceURL, instanceRole),
 			Status:  "stopped",
 			Restart: true,
 			Meta:    Meta{Tags: make(map[string]string)},
@@ -2402,11 +2444,8 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 		}
 
 		updates := make(map[string]string)
-		if instanceType, ok := params.Arguments["type"].(string); ok && instanceType != "" {
-			updates["type"] = instanceType
-		}
-		if password, ok := params.Arguments["password"].(string); ok {
-			updates["password"] = password
+		if instanceRole, ok := params.Arguments["role"].(string); ok && instanceRole != "" {
+			updates["type"] = instanceRole
 		}
 		if tunnelAddr, ok := params.Arguments["tunnel_address"].(string); ok && tunnelAddr != "" {
 			updates["tunnel_address"] = tunnelAddr
@@ -2721,7 +2760,7 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 
 		query := parsedURL.Query()
 		config := map[string]any{
-			"type": parsedURL.Scheme,
+			"role": parsedURL.Scheme,
 		}
 
 		if parsedURL.User != nil {
