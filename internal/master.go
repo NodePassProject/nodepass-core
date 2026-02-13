@@ -35,6 +35,7 @@ const (
 	mcpVersion      = "2025-11-25"
 	stateFilePath   = "gob"
 	stateFileName   = "nodepass.gob"
+	exportFileName  = "nodepass.json"
 	sseRetryTime    = 3000
 	apiKeyID        = "********"
 	tcpingSemLimit  = 10
@@ -2166,6 +2167,22 @@ func (m *Master) handleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 			},
 		},
 		{
+			"name":        "export_instances",
+			"description": "Export all instances configuration to nodepass.json",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			"name":        "import_instances",
+			"description": "Import instances configuration from nodepass.json",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
 			"name":        "tcping_target",
 			"description": "Test TCP connectivity (host:port latency probe)",
 			"inputSchema": map[string]any{
@@ -2216,7 +2233,10 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 	case "list_instances":
 		var instances []*Instance
 		m.instances.Range(func(_, value any) bool {
-			instances = append(instances, value.(*Instance))
+			instance := value.(*Instance)
+			if instance.ID != apiKeyID {
+				instances = append(instances, instance)
+			}
 			return true
 		})
 		m.writeMCPResponse(w, req.ID, map[string]any{
@@ -2828,6 +2848,122 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 
 		m.writeMCPResponse(w, req.ID, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Deleted instance %s", id)}},
+		})
+	case "export_instances":
+		exportPath := filepath.Join(m.statePath, exportFileName)
+		var exports []map[string]any
+		m.instances.Range(func(_, value any) bool {
+			instance := value.(*Instance)
+			if instance.ID != apiKeyID {
+				exports = append(exports, map[string]any{
+					"alias":   instance.Alias,
+					"url":     instance.URL,
+					"restart": instance.Restart,
+					"meta":    instance.Meta,
+					"tcprx":   instance.TCPRX,
+					"tcptx":   instance.TCPTX,
+					"udprx":   instance.UDPRX,
+					"udptx":   instance.UDPTX,
+				})
+			}
+			return true
+		})
+
+		data, err := json.MarshalIndent(exports, "", "  ")
+		if err != nil {
+			m.writeMCPError(w, req.ID, -32603, "Internal error", err.Error())
+			return
+		}
+
+		if err := os.WriteFile(exportPath, data, 0644); err != nil {
+			m.writeMCPError(w, req.ID, -32603, "Internal error", err.Error())
+			return
+		}
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Exported %d instances to %s", len(exports), exportPath)}},
+		})
+	case "import_instances":
+		importPath := filepath.Join(m.statePath, exportFileName)
+		data, err := os.ReadFile(importPath)
+		if err != nil {
+			m.writeMCPError(w, req.ID, -32603, "Internal error", err.Error())
+			return
+		}
+
+		var imports []map[string]any
+		if err := json.Unmarshal(data, &imports); err != nil {
+			m.writeMCPError(w, req.ID, -32602, "Invalid params", err.Error())
+			return
+		}
+
+		var created int
+		for _, imp := range imports {
+			instanceURL, _ := imp["url"].(string)
+			if instanceURL == "" {
+				continue
+			}
+
+			parsedURL, err := url.Parse(instanceURL)
+			if err != nil {
+				continue
+			}
+
+			instanceRole := parsedURL.Scheme
+			if instanceRole != "client" && instanceRole != "server" {
+				continue
+			}
+
+			id := generateID()
+			instance := &Instance{
+				ID:      id,
+				Alias:   "",
+				Type:    instanceRole,
+				URL:     m.enhanceURL(instanceURL, instanceRole),
+				Status:  "stopped",
+				Restart: true,
+				Meta:    Meta{Tags: make(map[string]string)},
+				stopped: make(chan struct{}),
+			}
+
+			if alias, ok := imp["alias"].(string); ok {
+				instance.Alias = alias
+			}
+			if restart, ok := imp["restart"].(bool); ok {
+				instance.Restart = restart
+			}
+			if meta, ok := imp["meta"].(map[string]any); ok {
+				if metaBytes, err := json.Marshal(meta); err == nil {
+					json.Unmarshal(metaBytes, &instance.Meta)
+				}
+			}
+			if tcprx, ok := imp["tcprx"].(float64); ok {
+				instance.TCPRX = uint64(tcprx)
+			}
+			if tcptx, ok := imp["tcptx"].(float64); ok {
+				instance.TCPTX = uint64(tcptx)
+			}
+			if udprx, ok := imp["udprx"].(float64); ok {
+				instance.UDPRX = uint64(udprx)
+			}
+			if udptx, ok := imp["udptx"].(float64); ok {
+				instance.UDPTX = uint64(udptx)
+			}
+
+			instance.Config = m.generateConfigURL(instance)
+			m.instances.Store(id, instance)
+			if instance.Restart {
+				go m.startInstance(instance)
+			}
+			created++
+		}
+		go func() {
+			time.Sleep(baseDuration)
+			m.saveState()
+		}()
+
+		m.writeMCPResponse(w, req.ID, map[string]any{
+			"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Imported %d instances from %s", created, importPath)}},
 		})
 	case "tcping_target":
 		target, _ := params.Arguments["target"].(string)
