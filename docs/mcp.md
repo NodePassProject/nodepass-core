@@ -203,13 +203,13 @@ Execute a specific tool.
 
 ## Available Tools
 
-NodePass provides 17 MCP tools covering all instance and master management operations:
+NodePass provides 19 MCP tools covering all instance and master management operations:
 
 ### Instance Management
 
 #### 1. list_instances
 
-List all NodePass instances.
+List all NodePass instances (excludes API Key instance).
 
 **Arguments**: None
 
@@ -686,9 +686,79 @@ Delete an instance.
 }
 ```
 
+#### 15. export_instances
+
+Export all instances configuration to nodepass.json file (excludes API Key instance). File is saved in the same directory as nodepass.gob. Exported fields: alias, url, restart, meta, tcprx, tcptx, udprx, udptx.
+
+**Arguments**: None
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "method": "tools/call",
+  "params": {
+    "name": "export_instances",
+    "arguments": {}
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Exported 5 instances to /path/to/nodepass.json"
+      }
+    ]
+  }
+}
+```
+
+#### 16. import_instances
+
+Import instances configuration from nodepass.json file. Automatically generates new unique IDs for each instance. Instances are started based on their restart field.
+
+**Arguments**: None
+
+**Example**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "tools/call",
+  "params": {
+    "name": "import_instances",
+    "arguments": {}
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Imported 5 instances from /path/to/nodepass.json"
+      }
+    ]
+  }
+}
+```
+
 ### Network Tools
 
-#### 15. tcping_target
+#### 17. tcping_target
 
 Test TCP connectivity to a target.
 
@@ -699,7 +769,7 @@ Test TCP connectivity to a target.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 15,
+  "id": 17,
   "method": "tools/call",
   "params": {
     "name": "tcping_target",
@@ -712,7 +782,7 @@ Test TCP connectivity to a target.
 
 ### Master Management
 
-#### 16. get_master_info
+#### 18. get_master_info
 
 Get master node information (CPU, memory, network, uptime, etc.).
 
@@ -722,7 +792,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 16,
+  "id": 18,
   "method": "tools/call",
   "params": {
     "name": "get_master_info",
@@ -735,7 +805,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 16,
+  "id": 18,
   "result": {
     "content": [
       {
@@ -758,7 +828,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
 }
 ```
 
-#### 17. update_master_info
+#### 19. update_master_info
 
 Update master node alias.
 
@@ -769,7 +839,7 @@ Update master node alias.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 17,
+  "id": 19,
   "method": "tools/call",
   "params": {
     "name": "update_master_info",

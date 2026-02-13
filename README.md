@@ -55,7 +55,7 @@
 - **AI-Powered Integration**
   - Model Context Protocol (MCP) 2.0 support for AI assistant integration.
   - JSON-RPC 2.0 interface with various comprehensive management tools.
-  - Compatible with Claude, GPT, and other AI platforms.
+  - Capable of handling complex network tasks with AI assistance.
 
 ## Documentation
 
