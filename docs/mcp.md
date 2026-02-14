@@ -330,12 +330,16 @@ Create a new NodePass instance with structured configuration.
 
 #### 4. update_instance
 
-Update instance metadata (alias, restart policy, tags).
+Update instance metadata (alias, restart policy, peer, tags).
 
 **Arguments**:
 - `id` (string, required): Instance ID
 - `alias` (string, optional): New alias
 - `restart` (boolean, optional): Auto-restart policy
+- `peer` (object, optional): Service and peer information
+  - `sid` (string): Service ID
+  - `type` (string): Service type
+  - `alias` (string): Service alias
 - `tags` (object, optional): Metadata tags
 
 **Example**:
@@ -350,6 +354,11 @@ Update instance metadata (alias, restart policy, tags).
       "id": "abc123",
       "alias": "New Name",
       "restart": true,
+      "peer": {
+        "sid": "service-001",
+        "type": "web-server",
+        "alias": "Production Web"
+      },
       "tags": {
         "env": "production",
         "team": "devops"
@@ -868,7 +877,7 @@ Instance configuration tools are organized by functional domain:
 
 | Tool | Domain | Purpose |
 |------|--------|---------|
-| `update_instance` | Metadata | Alias, tags, restart policy |
+| `update_instance` | Metadata | Alias, peer, tags, restart policy |
 | `control_instance` | State Control | Start, stop, restart, reset |
 | `set_instance_basic` | Addressing | Type, tunnel/target addresses, log level |
 | `set_instance_security` | Encryption | Password, TLS mode, certificates, SNI |

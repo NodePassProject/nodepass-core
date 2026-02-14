@@ -23,7 +23,7 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md). We are committ
 
 ### Prerequisites
 
-- **Go** 1.25+ (as specified in `go.mod`)
+- **Go** 1.26+ (as specified in `go.mod`)
 - **Git** for version control
 - **Docker** (optional, for container-based development and testing)
 - Basic knowledge of TCP/UDP networking concepts
@@ -42,7 +42,7 @@ Key components:
 - `/cmd/nodepass/`: Main application entry point and core dispatch logic
 - `/internal/`: Core implementation packages (server, client, master, common utilities)
 - `/docs/`: Comprehensive documentation in English
-- External dependencies: NodePassProject ecosystem libraries for certificates, connections, logging, and pooling
+- External dependencies: NodePassProject ecosystem libraries for connections, logging, and pooling
 
 ## Development Setup
 
@@ -278,13 +278,6 @@ Pull requests go through the following stages:
 5. **Final approval** and merge
 
 ## Community and Support
-
-### Communication Channels
-
-- **GitHub Issues**: Bug reports and feature requests
-- **Telegram Channel**: [@NodePassChannel](https://t.me/NodePassChannel) - Updates and announcements
-- **Telegram Group**: [@NodePassGroup](https://t.me/NodePassGroup) - Community discussion
-- **Discord**: [Join our server](https://discord.gg/2cnXcnDMGc) - Real-time chat
 
 ### Getting Help
 

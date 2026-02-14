@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/NodePassProject/logs"
-	"github.com/NodePassProject/nodepass/internal"
+	"github.com/NodePassProject/nodepass/internal/client"
+	"github.com/NodePassProject/nodepass/internal/common"
+	"github.com/NodePassProject/nodepass/internal/master"
+	"github.com/NodePassProject/nodepass/internal/server"
 )
 
 func start(args []string) error {
@@ -59,19 +62,19 @@ func createCore(parsedURL *url.URL, logger *logs.Logger) (interface{ Run() }, er
 	switch parsedURL.Scheme {
 	case "server":
 		tlsCode, tlsConfig := getTLSProtocol(parsedURL, logger)
-		return internal.NewServer(parsedURL, tlsCode, tlsConfig, logger)
+		return server.NewServer(parsedURL, tlsCode, tlsConfig, logger)
 	case "client":
-		return internal.NewClient(parsedURL, logger)
+		return client.NewClient(parsedURL, logger)
 	case "master":
 		tlsCode, tlsConfig := getTLSProtocol(parsedURL, logger)
-		return internal.NewMaster(parsedURL, tlsCode, tlsConfig, logger, version)
+		return master.NewMaster(parsedURL, tlsCode, tlsConfig, logger, version)
 	default:
 		return nil, fmt.Errorf("createCore: unknown core: %v", parsedURL)
 	}
 }
 
 func getTLSProtocol(parsedURL *url.URL, logger *logs.Logger) (string, *tls.Config) {
-	tlsConfig, err := internal.NewTLSConfig()
+	tlsConfig, err := common.NewTLSConfig()
 	if err != nil {
 		logger.Error("Generate TLS config failed: %v", err)
 		logger.Warn("TLS code-0: nil cert")
@@ -98,7 +101,7 @@ func getTLSProtocol(parsedURL *url.URL, logger *logs.Logger) (string, *tls.Confi
 		tlsConfig = &tls.Config{
 			MinVersion: tls.VersionTLS13,
 			GetCertificate: func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				if time.Since(lastReload) >= internal.ReloadInterval {
+				if time.Since(lastReload) >= common.ReloadInterval {
 					newCert, err := tls.LoadX509KeyPair(crtFile, keyFile)
 					if err != nil {
 						logger.Error("Certificate reload failed: %v", err)

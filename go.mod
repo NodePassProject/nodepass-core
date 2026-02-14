@@ -1,14 +1,14 @@
 module github.com/NodePassProject/nodepass
 
-go 1.25.6
+go 1.26.0
 
 require (
-	github.com/NodePassProject/conn v1.1.0
-	github.com/NodePassProject/logs v1.1.0
-	github.com/NodePassProject/nph2 v1.1.0
-	github.com/NodePassProject/npws v1.1.0
-	github.com/NodePassProject/pool v1.1.0
-	github.com/NodePassProject/quic v1.1.0
+	github.com/NodePassProject/conn v1.1.1
+	github.com/NodePassProject/logs v1.1.1
+	github.com/NodePassProject/nph2 v1.1.1
+	github.com/NodePassProject/npws v1.1.1
+	github.com/NodePassProject/pool v1.1.1
+	github.com/NodePassProject/quic v1.1.1
 )
 
 require (
