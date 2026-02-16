@@ -15,6 +15,7 @@ func (m *Master) getMasterInfo() map[string]any {
 		"alias":      m.alias,
 		"os":         runtime.GOOS,
 		"arch":       runtime.GOARCH,
+		"noc":        runtime.NumCPU(),
 		"cpu":        -1,
 		"mem_total":  uint64(0),
 		"mem_used":   uint64(0),

@@ -255,6 +255,7 @@ func (m *Master) generateOpenAPISpec() string {
 		  "alias": {"type": "string", "description": "Master alias"},
 		  "os": {"type": "string", "description": "Operating system"},
 		  "arch": {"type": "string", "description": "System architecture"},
+		  "noc": {"type": "integer", "description": "Number of CPU cores"},
 		  "cpu": {"type": "integer", "description": "CPU usage percentage"},
 		  "mem_total": {"type": "integer", "format": "int64", "description": "Total memory in bytes"},
 		  "mem_used": {"type": "integer", "format": "int64", "description": "Used memory in bytes"},
