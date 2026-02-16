@@ -39,36 +39,36 @@ type Master struct {
 }
 
 type Instance struct {
-	ID             string             `json:"id"`
-	Alias          string             `json:"alias"`
-	Type           string             `json:"type"`
-	Status         string             `json:"status"`
-	URL            string             `json:"url"`
-	Config         string             `json:"config"`
-	Restart        bool               `json:"restart"`
-	Meta           Meta               `json:"meta"`
-	Mode           int32              `json:"mode"`
-	Ping           int32              `json:"ping"`
-	Pool           int32              `json:"pool"`
-	TCPS           int32              `json:"tcps"`
-	UDPS           int32              `json:"udps"`
-	TCPRX          uint64             `json:"tcprx"`
-	TCPTX          uint64             `json:"tcptx"`
-	UDPRX          uint64             `json:"udprx"`
-	UDPTX          uint64             `json:"udptx"`
-	TCPRXBase      uint64             `json:"-" gob:"-"`
-	TCPTXBase      uint64             `json:"-" gob:"-"`
-	UDPRXBase      uint64             `json:"-" gob:"-"`
-	UDPTXBase      uint64             `json:"-" gob:"-"`
-	TCPRXReset     uint64             `json:"-" gob:"-"`
-	TCPTXReset     uint64             `json:"-" gob:"-"`
-	UDPRXReset     uint64             `json:"-" gob:"-"`
-	UDPTXReset     uint64             `json:"-" gob:"-"`
-	Cmd            *exec.Cmd          `json:"-" gob:"-"`
-	Stopped        chan struct{}      `json:"-" gob:"-"`
-	Deleted        bool               `json:"-" gob:"-"`
-	CancelFunc     context.CancelFunc `json:"-" gob:"-"`
-	LastCheckPoint time.Time          `json:"-" gob:"-"`
+	ID             string `json:"id"`
+	Alias          string `json:"alias"`
+	Type           string `json:"type"`
+	Status         string `json:"status"`
+	URL            string `json:"url"`
+	Config         string `json:"config"`
+	Restart        bool   `json:"restart"`
+	Meta           Meta   `json:"meta"`
+	Mode           int32  `json:"mode"`
+	Ping           int32  `json:"ping"`
+	Pool           int32  `json:"pool"`
+	TCPS           int32  `json:"tcps"`
+	UDPS           int32  `json:"udps"`
+	TCPRX          uint64 `json:"tcprx"`
+	TCPTX          uint64 `json:"tcptx"`
+	UDPRX          uint64 `json:"udprx"`
+	UDPTX          uint64 `json:"udptx"`
+	tcpRXBase      uint64
+	tcpTXBase      uint64
+	udpRXBase      uint64
+	udpTXBase      uint64
+	tcpRXReset     uint64
+	tcpTXReset     uint64
+	udpRXReset     uint64
+	udpTXReset     uint64
+	cmd            *exec.Cmd
+	stopped        chan struct{}
+	deleted        bool
+	cancelFunc     context.CancelFunc
+	lastCheckPoint time.Time
 }
 
 type Meta struct {

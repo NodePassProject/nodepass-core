@@ -48,8 +48,8 @@ func (w *InstanceLogWriter) Write(p []byte) (n int, err error) {
 			}
 
 			stats := []*uint64{&w.instance.TCPRX, &w.instance.TCPTX, &w.instance.UDPRX, &w.instance.UDPTX}
-			bases := []uint64{w.instance.TCPRXBase, w.instance.TCPTXBase, w.instance.UDPRXBase, w.instance.UDPTXBase}
-			resets := []*uint64{&w.instance.TCPRXReset, &w.instance.TCPTXReset, &w.instance.UDPRXReset, &w.instance.UDPTXReset}
+			bases := []uint64{w.instance.tcpRXBase, w.instance.tcpTXBase, w.instance.udpRXBase, w.instance.udpTXBase}
+			resets := []*uint64{&w.instance.tcpRXReset, &w.instance.tcpTXReset, &w.instance.udpRXReset, &w.instance.udpTXReset}
 			for i, stat := range stats {
 				if v, err := strconv.ParseUint(matches[i+6], 10, 64); err == nil {
 					if v >= *resets[i] {
@@ -61,20 +61,20 @@ func (w *InstanceLogWriter) Write(p []byte) (n int, err error) {
 				}
 			}
 
-			w.instance.LastCheckPoint = time.Now()
+			w.instance.lastCheckPoint = time.Now()
 
 			if w.instance.Status == "error" {
 				w.instance.Status = "running"
 			}
 
-			if !w.instance.Deleted {
+			if !w.instance.deleted {
 				w.master.instances.Store(w.instanceID, w.instance)
 				w.master.sendSSEEvent("update", w.instance)
 			}
 			continue
 		}
 
-		if w.instance.Status != "error" && !w.instance.Deleted &&
+		if w.instance.Status != "error" && !w.instance.deleted &&
 			(strings.Contains(line, "Server error:") || strings.Contains(line, "Client error:")) {
 			w.instance.Status = "error"
 			w.instance.Ping = 0
@@ -86,7 +86,7 @@ func (w *InstanceLogWriter) Write(p []byte) (n int, err error) {
 
 		fmt.Fprintf(w.target, "%s [%s]\n", line, w.instanceID)
 
-		if !w.instance.Deleted {
+		if !w.instance.deleted {
 			w.master.sendSSEEvent("log", w.instance, line)
 		}
 	}

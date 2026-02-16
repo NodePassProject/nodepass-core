@@ -217,7 +217,7 @@ func (m *Master) MasterShutdown(ctx context.Context) error {
 		var wg sync.WaitGroup
 		m.instances.Range(func(key, value any) bool {
 			instance := value.(*Instance)
-			if instance.Status != "stopped" && instance.Cmd != nil && instance.Cmd.Process != nil {
+			if instance.Status != "stopped" && instance.cmd != nil && instance.cmd.Process != nil {
 				wg.Add(1)
 				go func(inst *Instance) {
 					defer wg.Done()

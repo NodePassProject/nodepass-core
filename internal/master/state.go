@@ -93,7 +93,7 @@ func (m *Master) loadState() {
 	}
 
 	for id, instance := range persistentData {
-		instance.Stopped = make(chan struct{})
+		instance.stopped = make(chan struct{})
 
 		if instance.ID != apiKeyID {
 			instance.Status = "stopped"

@@ -570,7 +570,7 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			Status:  "stopped",
 			Restart: true,
 			Meta:    Meta{Tags: make(map[string]string)},
-			Stopped: make(chan struct{}),
+			stopped: make(chan struct{}),
 		}
 		instance.Config = m.generateConfigURL(instance)
 		m.instances.Store(id, instance)
@@ -697,18 +697,18 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 		}
 
 		if action == "reset" {
-			instance.TCPRXReset = instance.TCPRX - instance.TCPRXBase
-			instance.TCPTXReset = instance.TCPTX - instance.TCPTXBase
-			instance.UDPRXReset = instance.UDPRX - instance.UDPRXBase
-			instance.UDPTXReset = instance.UDPTX - instance.UDPTXBase
+			instance.tcpRXReset = instance.TCPRX - instance.tcpRXBase
+			instance.tcpTXReset = instance.TCPTX - instance.tcpTXBase
+			instance.udpRXReset = instance.UDPRX - instance.udpRXBase
+			instance.udpTXReset = instance.UDPTX - instance.udpTXBase
 			instance.TCPRX = 0
 			instance.TCPTX = 0
 			instance.UDPRX = 0
 			instance.UDPTX = 0
-			instance.TCPRXBase = 0
-			instance.TCPTXBase = 0
-			instance.UDPRXBase = 0
-			instance.UDPTXBase = 0
+			instance.tcpRXBase = 0
+			instance.tcpTXBase = 0
+			instance.udpRXBase = 0
+			instance.udpTXBase = 0
 			m.instances.Store(id, instance)
 			go m.saveState()
 			m.sendSSEEvent("update", instance)
@@ -1110,7 +1110,7 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 			return
 		}
 
-		instance.Deleted = true
+		instance.deleted = true
 		m.instances.Store(id, instance)
 
 		if instance.Status != "stopped" {
@@ -1197,7 +1197,7 @@ func (m *Master) handleMCPToolsCall(w http.ResponseWriter, req MCPRequest) {
 				Status:  "stopped",
 				Restart: true,
 				Meta:    Meta{Tags: make(map[string]string)},
-				Stopped: make(chan struct{}),
+				stopped: make(chan struct{}),
 			}
 
 			if alias, ok := imp["alias"].(string); ok {

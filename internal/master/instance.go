@@ -31,10 +31,10 @@ func (m *Master) startInstance(instance *Instance) {
 		}
 	}
 
-	instance.TCPRXBase = instance.TCPRX
-	instance.TCPTXBase = instance.TCPTX
-	instance.UDPRXBase = instance.UDPRX
-	instance.UDPTXBase = instance.UDPTX
+	instance.tcpRXBase = instance.TCPRX
+	instance.tcpTXBase = instance.TCPTX
+	instance.udpRXBase = instance.UDPRX
+	instance.udpTXBase = instance.UDPTX
 
 	execPath, err := os.Executable()
 	if err != nil {
@@ -47,7 +47,7 @@ func (m *Master) startInstance(instance *Instance) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, execPath, instance.URL)
-	instance.CancelFunc = cancel
+	instance.cancelFunc = cancel
 
 	writer := NewInstanceLogWriter(instance.ID, instance, os.Stdout, m)
 	cmd.Stdout, cmd.Stderr = writer, writer
@@ -67,7 +67,7 @@ func (m *Master) startInstance(instance *Instance) {
 		return
 	}
 
-	instance.Cmd = cmd
+	instance.cmd = cmd
 	instance.Status = "running"
 	go m.monitorInstance(instance, cmd)
 
@@ -82,7 +82,7 @@ func (m *Master) monitorInstance(instance *Instance, cmd *exec.Cmd) {
 
 	for {
 		select {
-		case <-instance.Stopped:
+		case <-instance.stopped:
 			return
 		case err := <-done:
 			if value, exists := m.instances.Load(instance.ID); exists {
@@ -100,7 +100,7 @@ func (m *Master) monitorInstance(instance *Instance, cmd *exec.Cmd) {
 			}
 			return
 		case <-time.After(common.ReportInterval):
-			if !instance.LastCheckPoint.IsZero() && time.Since(instance.LastCheckPoint) > 3*common.ReportInterval {
+			if !instance.lastCheckPoint.IsZero() && time.Since(instance.lastCheckPoint) > 3*common.ReportInterval {
 				instance.Status = "error"
 				m.instances.Store(instance.ID, instance)
 				m.sendSSEEvent("update", instance)
@@ -114,7 +114,7 @@ func (m *Master) stopInstance(instance *Instance) {
 		return
 	}
 
-	if instance.Cmd == nil || instance.Cmd.Process == nil {
+	if instance.cmd == nil || instance.cmd.Process == nil {
 		instance.Status = "stopped"
 		m.instances.Store(instance.ID, instance)
 		m.sendSSEEvent("update", instance)
@@ -122,20 +122,20 @@ func (m *Master) stopInstance(instance *Instance) {
 	}
 
 	select {
-	case <-instance.Stopped:
+	case <-instance.stopped:
 	default:
-		close(instance.Stopped)
+		close(instance.stopped)
 	}
 
-	process := instance.Cmd.Process
+	process := instance.cmd.Process
 	if runtime.GOOS == "windows" {
 		process.Signal(os.Interrupt)
 	} else {
 		process.Signal(syscall.SIGTERM)
 	}
 
-	if instance.CancelFunc != nil {
-		instance.CancelFunc()
+	if instance.cancelFunc != nil {
+		instance.cancelFunc()
 	}
 
 	done := make(chan struct{})
@@ -154,8 +154,8 @@ func (m *Master) stopInstance(instance *Instance) {
 	}
 
 	instance.Status = "stopped"
-	instance.Stopped = make(chan struct{})
-	instance.CancelFunc = nil
+	instance.stopped = make(chan struct{})
+	instance.cancelFunc = nil
 	instance.Ping = 0
 	instance.Pool = 0
 	instance.TCPS = 0

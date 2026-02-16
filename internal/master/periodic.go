@@ -59,7 +59,7 @@ func (m *Master) performPeriodicCleanup() {
 			if i == keepIdx {
 				continue
 			}
-			inst.Deleted = true
+			inst.deleted = true
 			if inst.Status != "stopped" {
 				m.stopInstance(inst)
 			}
@@ -73,7 +73,7 @@ func (m *Master) performPeriodicRestart() {
 	m.instances.Range(func(key, value any) bool {
 		if id := key.(string); id != apiKeyID {
 			instance := value.(*Instance)
-			if instance.Status == "error" && !instance.Deleted {
+			if instance.Status == "error" && !instance.deleted {
 				errorInstances = append(errorInstances, instance)
 			}
 		}

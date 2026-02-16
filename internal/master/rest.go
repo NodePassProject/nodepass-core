@@ -58,7 +58,7 @@ func (m *Master) handleInstances(w http.ResponseWriter, r *http.Request) {
 			Status:  "stopped",
 			Restart: true,
 			Meta:    Meta{Tags: make(map[string]string)},
-			Stopped: make(chan struct{}),
+			stopped: make(chan struct{}),
 		}
 
 		instance.Config = m.generateConfigURL(instance)
@@ -153,18 +153,18 @@ func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 				}
 
 				if reqData.Action == "reset" {
-					instance.TCPRXReset = instance.TCPRX - instance.TCPRXBase
-					instance.TCPTXReset = instance.TCPTX - instance.TCPTXBase
-					instance.UDPRXReset = instance.UDPRX - instance.UDPRXBase
-					instance.UDPTXReset = instance.UDPTX - instance.UDPTXBase
+					instance.tcpRXReset = instance.TCPRX - instance.tcpRXBase
+					instance.tcpTXReset = instance.TCPTX - instance.tcpTXBase
+					instance.udpRXReset = instance.UDPRX - instance.udpRXBase
+					instance.udpTXReset = instance.UDPTX - instance.udpTXBase
 					instance.TCPRX = 0
 					instance.TCPTX = 0
 					instance.UDPRX = 0
 					instance.UDPTX = 0
-					instance.TCPRXBase = 0
-					instance.TCPTXBase = 0
-					instance.UDPRXBase = 0
-					instance.UDPTXBase = 0
+					instance.tcpRXBase = 0
+					instance.tcpTXBase = 0
+					instance.udpRXBase = 0
+					instance.udpTXBase = 0
 					m.instances.Store(id, instance)
 					go m.saveState()
 					m.Logger.Info("Traffic stats reset: 0 [%v]", instance.ID)
@@ -294,7 +294,7 @@ func (m *Master) handleDeleteInstance(w http.ResponseWriter, id string, instance
 		return
 	}
 
-	instance.Deleted = true
+	instance.deleted = true
 	m.instances.Store(id, instance)
 
 	if instance.Status != "stopped" {
