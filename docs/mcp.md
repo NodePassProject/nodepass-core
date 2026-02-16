@@ -827,6 +827,7 @@ Get master node information (CPU, memory, network, uptime, etc.).
       "alias": "Master Node",
       "os": "linux",
       "arch": "amd64",
+      "noc": 8,
       "cpu": 15,
       "mem_total": 16777216,
       "mem_used": 8388608,

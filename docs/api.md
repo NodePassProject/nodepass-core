@@ -1199,6 +1199,7 @@ The response contains the following system information fields:
   "alias": "dev",             // Master alias
   "os": "linux",              // Operating system type
   "arch": "amd64",            // System architecture
+  "noc": 8,                   // Number of CPU cores
   "cpu": 45,                  // CPU usage percentage (Linux only)
   "mem_total": 8589934592,    // Total memory in bytes (Linux only)
   "mem_used": 2684354560,     // Used memory in bytes (Linux only)
