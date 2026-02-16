@@ -4,7 +4,7 @@ This guide provides detailed instructions for installing NodePass using differen
 
 ## System Requirements
 
-- Go 1.25 or higher (for building from source)
+- Go 1.26 or higher (for building from source)
 - Network connectivity between server and client endpoints
 - Admin privileges may be required for binding to ports below 1024
 
@@ -72,17 +72,6 @@ docker run -d --name nodepass-client \
   -p 8080:8080 \
   ghcr.io/NodePassProject/nodepass "client://nodepass-server:10101/127.0.0.1:8080?min=32&max=512"
 ```
-
-### Option 5: Using Management Script (Linux Only)
-
-For Linux systems, we provide a one-click script:
-
-```bash
-bash <(curl -sSL https://run.nodepass.eu/np.sh)
-```
-
-- This script provides easy-to-use master mode (API mode) installation, configuration, and management functions.
-- For details, please refer to [https://github.com/NodePassProject/npsh](https://github.com/NodePassProject/npsh)
 
 ## Verifying Installation
 
