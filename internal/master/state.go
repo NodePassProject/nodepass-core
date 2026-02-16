@@ -13,9 +13,7 @@ func (m *Master) saveState() error {
 }
 
 func (m *Master) saveStateToPath(filePath string) error {
-	if !m.stateMu.TryLock() {
-		return nil
-	}
+	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
 
 	persistentData := make(map[string]*Instance)
