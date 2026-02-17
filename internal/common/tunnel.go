@@ -14,7 +14,7 @@ import (
 func (c *Common) TunnelLoop() {
 	for c.Ctx.Err() == nil {
 		if c.TunnelPool.Ready() {
-			if c.TlsCode == "1" {
+			if c.TLSCode == "1" {
 				select {
 				case <-c.VerifyChan:
 				case <-c.Ctx.Done():
@@ -46,7 +46,7 @@ func (c *Common) TunnelTCPLoop() {
 			if c.Ctx.Err() != nil || err == net.ErrClosed {
 				return
 			}
-			c.Logger.Error("tunnelTCPLoop: accept failed: %v", err)
+			c.Logger.Error("TunnelTCPLoop: accept failed: %v", err)
 
 			select {
 			case <-c.Ctx.Done():
@@ -56,7 +56,7 @@ func (c *Common) TunnelTCPLoop() {
 			continue
 		}
 
-		targetConn = &conn.StatConn{Conn: targetConn, RX: &c.TcpRX, TX: &c.TcpTX, Rate: c.RateLimiter}
+		targetConn = &conn.StatConn{Conn: targetConn, RX: &c.TCPRX, TX: &c.TCPTX, Rate: c.RateLimiter}
 		c.Logger.Debug("Target connection: %v <-> %v", targetConn.LocalAddr(), targetConn.RemoteAddr())
 
 		go func(targetConn net.Conn) {
@@ -67,21 +67,21 @@ func (c *Common) TunnelTCPLoop() {
 			}()
 
 			if !c.TryAcquireSlot(false) {
-				c.Logger.Error("tunnelTCPLoop: TCP slot limit reached: %v/%v", c.TcpSlot, c.SlotLimit)
+				c.Logger.Error("TunnelTCPLoop: TCP slot limit reached: %v/%v", c.TCPSlot, c.SlotLimit)
 				return
 			}
 			defer c.ReleaseSlot(false)
 
 			protocol, wrappedConn := c.DetectBlockProtocol(targetConn)
 			if protocol != "" {
-				c.Logger.Warn("tunnelTCPLoop: blocked %v protocol from %v", protocol, targetConn.RemoteAddr())
+				c.Logger.Warn("TunnelTCPLoop: blocked %v protocol from %v", protocol, targetConn.RemoteAddr())
 				return
 			}
 			targetConn = wrappedConn
 
 			id, remoteConn, err := c.TunnelPool.IncomingGet(PoolGetTimeout)
 			if err != nil {
-				c.Logger.Warn("tunnelTCPLoop: request timeout: %v", err)
+				c.Logger.Warn("TunnelTCPLoop: request timeout: %v", err)
 				return
 			}
 
@@ -130,7 +130,7 @@ func (c *Common) TunnelUDPLoop() {
 				c.PutUDPBuffer(buffer)
 				return
 			}
-			c.Logger.Error("tunnelUDPLoop: readFromUDP failed: %v", err)
+			c.Logger.Error("TunnelUDPLoop: readFromUDP failed: %v", err)
 			c.PutUDPBuffer(buffer)
 
 			select {
@@ -152,14 +152,14 @@ func (c *Common) TunnelUDPLoop() {
 			c.Logger.Debug("Using UDP session: %v <-> %v", remoteConn.LocalAddr(), remoteConn.RemoteAddr())
 		} else {
 			if !c.TryAcquireSlot(true) {
-				c.Logger.Error("tunnelUDPLoop: UDP slot limit reached: %v/%v", c.UdpSlot, c.SlotLimit)
+				c.Logger.Error("TunnelUDPLoop: UDP slot limit reached: %v/%v", c.UDPSlot, c.SlotLimit)
 				c.PutUDPBuffer(buffer)
 				continue
 			}
 
 			id, remoteConn, err = c.TunnelPool.IncomingGet(PoolGetTimeout)
 			if err != nil {
-				c.Logger.Warn("tunnelUDPLoop: request timeout: %v", err)
+				c.Logger.Warn("TunnelUDPLoop: request timeout: %v", err)
 				c.ReleaseSlot(true)
 				c.PutUDPBuffer(buffer)
 				continue
@@ -181,7 +181,7 @@ func (c *Common) TunnelUDPLoop() {
 
 				buffer := c.GetUDPBuffer()
 				defer c.PutUDPBuffer(buffer)
-				reader := &conn.TimeoutReader{Conn: remoteConn, Timeout: UdpReadTimeout}
+				reader := &conn.TimeoutReader{Conn: remoteConn, Timeout: UDPReadTimeout}
 
 				for c.Ctx.Err() == nil {
 					x, err := reader.Read(buffer)
@@ -189,7 +189,7 @@ func (c *Common) TunnelUDPLoop() {
 						if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 							c.Logger.Debug("UDP session abort: %v", err)
 						} else if err != io.EOF {
-							c.Logger.Error("tunnelUDPLoop: read from tunnel failed: %v", err)
+							c.Logger.Error("TunnelUDPLoop: read from tunnel failed: %v", err)
 						}
 						return
 					}
@@ -197,7 +197,7 @@ func (c *Common) TunnelUDPLoop() {
 					_, err = c.TargetUDPConn.WriteToUDP(buffer[:x], clientAddr)
 					if err != nil {
 						if err != io.EOF {
-							c.Logger.Error("tunnelUDPLoop: writeToUDP failed: %v", err)
+							c.Logger.Error("TunnelUDPLoop: writeToUDP failed: %v", err)
 						}
 						return
 					}
@@ -221,7 +221,7 @@ func (c *Common) TunnelUDPLoop() {
 		_, err = remoteConn.Write(buffer[:x])
 		if err != nil {
 			if err != io.EOF {
-				c.Logger.Error("tunnelUDPLoop: write to tunnel failed: %v", err)
+				c.Logger.Error("TunnelUDPLoop: write to tunnel failed: %v", err)
 			}
 			c.TargetUDPSession.Delete(sessionKey)
 			remoteConn.Close()
@@ -239,7 +239,7 @@ func (c *Common) CommonOnce() error {
 		if !c.TunnelPool.Ready() {
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("commonOnce: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("CommonOnce: context error: %w", c.Ctx.Err())
 			case <-time.After(ContextCheckInterval):
 			}
 			continue
@@ -247,11 +247,11 @@ func (c *Common) CommonOnce() error {
 
 		select {
 		case <-c.Ctx.Done():
-			return fmt.Errorf("commonOnce: context error: %w", c.Ctx.Err())
+			return fmt.Errorf("CommonOnce: context error: %w", c.Ctx.Err())
 		case signal := <-c.SignalChan:
 			switch signal.ActionType {
 			case "verify":
-				if c.TlsCode == "1" {
+				if c.TLSCode == "1" {
 					go c.OutgoingVerify(signal)
 				}
 			case "tcp":
@@ -283,15 +283,15 @@ func (c *Common) CommonOnce() error {
 			case "pong":
 				c.Logger.Event("CHECK_POINT|MODE=%v|PING=%vms|POOL=%v|TCPS=%v|UDPS=%v|TCPRX=%v|TCPTX=%v|UDPRX=%v|UDPTX=%v",
 					c.RunMode, time.Since(c.CheckPoint).Milliseconds(), c.TunnelPool.Active(),
-					atomic.LoadInt32(&c.TcpSlot), atomic.LoadInt32(&c.UdpSlot),
-					atomic.LoadUint64(&c.TcpRX), atomic.LoadUint64(&c.TcpTX),
-					atomic.LoadUint64(&c.UdpRX), atomic.LoadUint64(&c.UdpTX))
+					atomic.LoadInt32(&c.TCPSlot), atomic.LoadInt32(&c.UDPSlot),
+					atomic.LoadUint64(&c.TCPRX), atomic.LoadUint64(&c.TCPTX),
+					atomic.LoadUint64(&c.UDPRX), atomic.LoadUint64(&c.UDPTX))
 			default:
 			}
 		}
 	}
 
-	return fmt.Errorf("commonOnce: context error: %w", c.Ctx.Err())
+	return fmt.Errorf("CommonOnce: context error: %w", c.Ctx.Err())
 }
 
 func (c *Common) TunnelTCPOnce(signal Signal) {
@@ -300,7 +300,7 @@ func (c *Common) TunnelTCPOnce(signal Signal) {
 
 	remoteConn, err := c.TunnelPool.OutgoingGet(id, PoolGetTimeout)
 	if err != nil {
-		c.Logger.Error("tunnelTCPOnce: request timeout: %v", err)
+		c.Logger.Error("TunnelTCPOnce: request timeout: %v", err)
 		c.TunnelPool.AddError()
 		return
 	}
@@ -317,15 +317,15 @@ func (c *Common) TunnelTCPOnce(signal Signal) {
 	c.Logger.Debug("Tunnel connection: %v <-> %v", remoteConn.LocalAddr(), remoteConn.RemoteAddr())
 
 	if !c.TryAcquireSlot(false) {
-		c.Logger.Error("tunnelTCPOnce: TCP slot limit reached: %v/%v", c.TcpSlot, c.SlotLimit)
+		c.Logger.Error("TunnelTCPOnce: TCP slot limit reached: %v/%v", c.TCPSlot, c.SlotLimit)
 		return
 	}
 
 	defer c.ReleaseSlot(false)
 
-	targetConn, err := c.DialWithRotation("tcp", TcpDialTimeout)
+	targetConn, err := c.DialWithRotation("tcp", TCPDialTimeout)
 	if err != nil {
-		c.Logger.Error("tunnelTCPOnce: dialWithRotation failed: %v", err)
+		c.Logger.Error("TunnelTCPOnce: dialWithRotation failed: %v", err)
 		return
 	}
 
@@ -335,11 +335,11 @@ func (c *Common) TunnelTCPOnce(signal Signal) {
 		}
 	}()
 
-	targetConn = &conn.StatConn{Conn: targetConn, RX: &c.TcpRX, TX: &c.TcpTX, Rate: c.RateLimiter}
+	targetConn = &conn.StatConn{Conn: targetConn, RX: &c.TCPRX, TX: &c.TCPTX, Rate: c.RateLimiter}
 	c.Logger.Debug("Target connection: %v <-> %v", targetConn.LocalAddr(), targetConn.RemoteAddr())
 
 	if err := c.SendProxyV1Header(signal.RemoteAddr, targetConn); err != nil {
-		c.Logger.Error("tunnelTCPOnce: sendProxyV1Header failed: %v", err)
+		c.Logger.Error("TunnelTCPOnce: sendProxyV1Header failed: %v", err)
 		return
 	}
 
@@ -360,7 +360,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 
 	remoteConn, err := c.TunnelPool.OutgoingGet(id, PoolGetTimeout)
 	if err != nil {
-		c.Logger.Error("tunnelUDPOnce: request timeout: %v", err)
+		c.Logger.Error("TunnelUDPOnce: request timeout: %v", err)
 		c.TunnelPool.AddError()
 		return
 	}
@@ -386,17 +386,17 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 		isNewSession = true
 
 		if !c.TryAcquireSlot(true) {
-			c.Logger.Error("tunnelUDPOnce: UDP slot limit reached: %v/%v", c.UdpSlot, c.SlotLimit)
+			c.Logger.Error("TunnelUDPOnce: UDP slot limit reached: %v/%v", c.UDPSlot, c.SlotLimit)
 			return
 		}
 
-		newSession, err := c.DialWithRotation("udp", UdpDialTimeout)
+		newSession, err := c.DialWithRotation("udp", UDPDialTimeout)
 		if err != nil {
-			c.Logger.Error("tunnelUDPOnce: dialWithRotation failed: %v", err)
+			c.Logger.Error("TunnelUDPOnce: dialWithRotation failed: %v", err)
 			c.ReleaseSlot(true)
 			return
 		}
-		targetConn = &conn.StatConn{Conn: newSession, RX: &c.UdpRX, TX: &c.UdpTX, Rate: c.RateLimiter}
+		targetConn = &conn.StatConn{Conn: newSession, RX: &c.UDPRX, TX: &c.UDPTX, Rate: c.RateLimiter}
 		c.TargetUDPSession.Store(sessionKey, targetConn)
 		c.Logger.Debug("Target connection: %v <-> %v", targetConn.LocalAddr(), targetConn.RemoteAddr())
 	}
@@ -420,7 +420,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 
 		buffer := c.GetUDPBuffer()
 		defer c.PutUDPBuffer(buffer)
-		reader := &conn.TimeoutReader{Conn: remoteConn, Timeout: UdpReadTimeout}
+		reader := &conn.TimeoutReader{Conn: remoteConn, Timeout: UDPReadTimeout}
 
 		for c.Ctx.Err() == nil {
 			x, err := reader.Read(buffer)
@@ -428,7 +428,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					c.Logger.Debug("UDP session abort: %v", err)
 				} else if err != io.EOF {
-					c.Logger.Error("tunnelUDPOnce: read from tunnel failed: %v", err)
+					c.Logger.Error("TunnelUDPOnce: read from tunnel failed: %v", err)
 				}
 				return
 			}
@@ -436,7 +436,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 			_, err = targetConn.Write(buffer[:x])
 			if err != nil {
 				if err != io.EOF {
-					c.Logger.Error("tunnelUDPOnce: write to target failed: %v", err)
+					c.Logger.Error("TunnelUDPOnce: write to target failed: %v", err)
 				}
 				return
 			}
@@ -450,7 +450,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 
 		buffer := c.GetUDPBuffer()
 		defer c.PutUDPBuffer(buffer)
-		reader := &conn.TimeoutReader{Conn: targetConn, Timeout: UdpReadTimeout}
+		reader := &conn.TimeoutReader{Conn: targetConn, Timeout: UDPReadTimeout}
 
 		for c.Ctx.Err() == nil {
 			x, err := reader.Read(buffer)
@@ -458,7 +458,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					c.Logger.Debug("UDP session abort: %v", err)
 				} else if err != io.EOF {
-					c.Logger.Error("tunnelUDPOnce: read from target failed: %v", err)
+					c.Logger.Error("TunnelUDPOnce: read from target failed: %v", err)
 				}
 				return
 			}
@@ -466,7 +466,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 			_, err = remoteConn.Write(buffer[:x])
 			if err != nil {
 				if err != io.EOF {
-					c.Logger.Error("tunnelUDPOnce: write to tunnel failed: %v", err)
+					c.Logger.Error("TunnelUDPOnce: write to tunnel failed: %v", err)
 				}
 				return
 			}

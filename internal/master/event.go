@@ -16,11 +16,11 @@ import (
 
 func NewInstanceLogWriter(instanceID string, instance *Instance, target io.Writer, master *Master) *InstanceLogWriter {
 	return &InstanceLogWriter{
-		instanceID: instanceID,
-		instance:   instance,
-		target:     target,
-		master:     master,
-		checkPoint: regexp.MustCompile(`CHECK_POINT\|MODE=(\d+)\|PING=(\d+)ms\|POOL=(\d+)\|TCPS=(\d+)\|UDPS=(\d+)\|TCPRX=(\d+)\|TCPTX=(\d+)\|UDPRX=(\d+)\|UDPTX=(\d+)`),
+		InstanceID: instanceID,
+		Instance:   instance,
+		Target:     target,
+		Master:     master,
+		CheckPoint: regexp.MustCompile(`CHECK_POINT\|MODE=(\d+)\|PING=(\d+)ms\|POOL=(\d+)\|TCPS=(\d+)\|UDPS=(\d+)\|TCPRX=(\d+)\|TCPTX=(\d+)\|UDPRX=(\d+)\|UDPTX=(\d+)`),
 	}
 }
 
@@ -30,26 +30,26 @@ func (w *InstanceLogWriter) Write(p []byte) (n int, err error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if matches := w.checkPoint.FindStringSubmatch(line); len(matches) == 10 {
+		if matches := w.CheckPoint.FindStringSubmatch(line); len(matches) == 10 {
 			if mode, err := strconv.ParseInt(matches[1], 10, 32); err == nil {
-				w.instance.Mode = int32(mode)
+				w.Instance.Mode = int32(mode)
 			}
 			if ping, err := strconv.ParseInt(matches[2], 10, 32); err == nil {
-				w.instance.Ping = int32(ping)
+				w.Instance.Ping = int32(ping)
 			}
 			if pool, err := strconv.ParseInt(matches[3], 10, 32); err == nil {
-				w.instance.Pool = int32(pool)
+				w.Instance.Pool = int32(pool)
 			}
 			if tcps, err := strconv.ParseInt(matches[4], 10, 32); err == nil {
-				w.instance.TCPS = int32(tcps)
+				w.Instance.TCPS = int32(tcps)
 			}
 			if udps, err := strconv.ParseInt(matches[5], 10, 32); err == nil {
-				w.instance.UDPS = int32(udps)
+				w.Instance.UDPS = int32(udps)
 			}
 
-			stats := []*uint64{&w.instance.TCPRX, &w.instance.TCPTX, &w.instance.UDPRX, &w.instance.UDPTX}
-			bases := []uint64{w.instance.tcpRXBase, w.instance.tcpTXBase, w.instance.udpRXBase, w.instance.udpTXBase}
-			resets := []*uint64{&w.instance.tcpRXReset, &w.instance.tcpTXReset, &w.instance.udpRXReset, &w.instance.udpTXReset}
+			stats := []*uint64{&w.Instance.TCPRX, &w.Instance.TCPTX, &w.Instance.UDPRX, &w.Instance.UDPTX}
+			bases := []uint64{w.Instance.tcpRXBase, w.Instance.tcpTXBase, w.Instance.udpRXBase, w.Instance.udpTXBase}
+			resets := []*uint64{&w.Instance.tcpRXReset, &w.Instance.tcpTXReset, &w.Instance.udpRXReset, &w.Instance.udpTXReset}
 			for i, stat := range stats {
 				if v, err := strconv.ParseUint(matches[i+6], 10, 64); err == nil {
 					if v >= *resets[i] {
@@ -61,45 +61,45 @@ func (w *InstanceLogWriter) Write(p []byte) (n int, err error) {
 				}
 			}
 
-			w.instance.lastCheckPoint = time.Now()
+			w.Instance.lastCheckPoint = time.Now()
 
-			if w.instance.Status == "error" {
-				w.instance.Status = "running"
+			if w.Instance.Status == "error" {
+				w.Instance.Status = "running"
 			}
 
-			if !w.instance.deleted {
-				w.master.instances.Store(w.instanceID, w.instance)
-				w.master.sendSSEEvent("update", w.instance)
+			if !w.Instance.deleted {
+				w.Master.Instances.Store(w.InstanceID, w.Instance)
+				w.Master.SendSSEEvent("update", w.Instance)
 			}
 			continue
 		}
 
-		if w.instance.Status != "error" && !w.instance.deleted &&
+		if w.Instance.Status != "error" && !w.Instance.deleted &&
 			(strings.Contains(line, "Server error:") || strings.Contains(line, "Client error:")) {
-			w.instance.Status = "error"
-			w.instance.Ping = 0
-			w.instance.Pool = 0
-			w.instance.TCPS = 0
-			w.instance.UDPS = 0
-			w.master.instances.Store(w.instanceID, w.instance)
+			w.Instance.Status = "error"
+			w.Instance.Ping = 0
+			w.Instance.Pool = 0
+			w.Instance.TCPS = 0
+			w.Instance.UDPS = 0
+			w.Master.Instances.Store(w.InstanceID, w.Instance)
 		}
 
-		fmt.Fprintf(w.target, "%s [%s]\n", line, w.instanceID)
+		fmt.Fprintf(w.Target, "%s [%s]\n", line, w.InstanceID)
 
-		if !w.instance.deleted {
-			w.master.sendSSEEvent("log", w.instance, line)
+		if !w.Instance.deleted {
+			w.Master.SendSSEEvent("log", w.Instance, line)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(w.target, "%s [%s]", s, w.instanceID)
+		fmt.Fprintf(w.Target, "%s [%s]", s, w.InstanceID)
 	}
 	return len(p), nil
 }
 
-func (m *Master) handleSSE(w http.ResponseWriter, r *http.Request) {
+func (m *Master) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		HTTPError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -108,16 +108,16 @@ func (m *Master) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	subscriberID := generateID()
+	subscriberID := GenerateID()
 
 	events := make(chan *InstanceEvent, 10)
 
-	m.subscribers.Store(subscriberID, events)
-	defer m.subscribers.Delete(subscriberID)
+	m.Subscribers.Store(subscriberID, events)
+	defer m.Subscribers.Delete(subscriberID)
 
-	fmt.Fprintf(w, "retry: %d\n\n", sseRetryTime)
+	fmt.Fprintf(w, "retry: %d\n\n", SSERetryTime)
 
-	m.instances.Range(func(_, value any) bool {
+	m.Instances.Range(func(_, value any) bool {
 		instance := value.(*Instance)
 		event := &InstanceEvent{
 			Type:     "initial",
@@ -141,7 +141,7 @@ func (m *Master) handleSSE(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		<-ctx.Done()
 		close(connectionClosed)
-		if ch, exists := m.subscribers.LoadAndDelete(subscriberID); exists {
+		if ch, exists := m.Subscribers.LoadAndDelete(subscriberID); exists {
 			close(ch.(chan *InstanceEvent))
 		}
 	}()
@@ -157,7 +157,7 @@ func (m *Master) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 			data, err := json.Marshal(event)
 			if err != nil {
-				m.Logger.Error("handleSSE: event marshal error: %v", err)
+				m.Logger.Error("HandleSSE: event marshal error: %v", err)
 				continue
 			}
 
@@ -167,7 +167,7 @@ func (m *Master) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *Master) sendSSEEvent(eventType string, instance *Instance, logs ...string) {
+func (m *Master) SendSSEEvent(eventType string, instance *Instance, logs ...string) {
 	event := &InstanceEvent{
 		Type:     eventType,
 		Time:     time.Now(),
@@ -179,15 +179,15 @@ func (m *Master) sendSSEEvent(eventType string, instance *Instance, logs ...stri
 	}
 
 	select {
-	case m.notifyChannel <- event:
+	case m.NotifyChannel <- event:
 	default:
 	}
 }
 
-func (m *Master) shutdownSSEConnections() {
+func (m *Master) ShutdownSSEConnections() {
 	var wg sync.WaitGroup
 
-	m.subscribers.Range(func(key, value any) bool {
+	m.Subscribers.Range(func(key, value any) bool {
 		ch := value.(chan *InstanceEvent)
 		wg.Add(1)
 		go func(subscriberID any, eventChan chan *InstanceEvent) {
@@ -196,7 +196,7 @@ func (m *Master) shutdownSSEConnections() {
 			case eventChan <- &InstanceEvent{Type: "shutdown", Time: time.Now()}:
 			default:
 			}
-			if _, exists := m.subscribers.LoadAndDelete(subscriberID); exists {
+			if _, exists := m.Subscribers.LoadAndDelete(subscriberID); exists {
 				close(eventChan)
 			}
 		}(key, ch)
@@ -206,9 +206,9 @@ func (m *Master) shutdownSSEConnections() {
 	wg.Wait()
 }
 
-func (m *Master) startEventDispatcher() {
-	for event := range m.notifyChannel {
-		m.subscribers.Range(func(_, value any) bool {
+func (m *Master) StartEventDispatcher() {
+	for event := range m.NotifyChannel {
+		m.Subscribers.Range(func(_, value any) bool {
 			eventChan := value.(chan *InstanceEvent)
 			select {
 			case eventChan <- event:

@@ -11,7 +11,7 @@ import (
 	"github.com/NodePassProject/nodepass/internal/common"
 )
 
-func (s *Server) tunnelHandshake() error {
+func (s *Server) TunnelHandshake() error {
 	var clientIP string
 	done := make(chan struct{})
 
@@ -39,12 +39,12 @@ func (s *Server) tunnelHandshake() error {
 			json.NewEncoder(w).Encode(map[string]any{
 				"flow": s.DataFlow,
 				"max":  s.MaxPoolCapacity,
-				"tls":  s.TlsCode,
+				"tls":  s.TLSCode,
 				"type": s.PoolType,
 			})
 
 			s.Logger.Info("Sending tunnel config: FLOW=%v|MAX=%v|TLS=%v|TYPE=%v",
-				s.DataFlow, s.MaxPoolCapacity, s.TlsCode, s.PoolType)
+				s.DataFlow, s.MaxPoolCapacity, s.TLSCode, s.PoolType)
 
 			close(done)
 		case http.MethodConnect:
@@ -60,7 +60,7 @@ func (s *Server) tunnelHandshake() error {
 		}
 	})
 
-	tlsConfig := s.TlsConfig
+	tlsConfig := s.TLSConfig
 	if tlsConfig == nil {
 		tlsConfig, _ = common.NewTLSConfig()
 	}
@@ -81,10 +81,10 @@ func (s *Server) tunnelHandshake() error {
 	case <-done:
 		server.Close()
 		s.ClientIP = clientIP
-		if s.TlsCode == "1" {
+		if s.TLSCode == "1" {
 			if newTLSConfig, err := common.NewTLSConfig(); err == nil {
 				newTLSConfig.MinVersion = tls.VersionTLS13
-				s.TlsConfig = newTLSConfig
+				s.TLSConfig = newTLSConfig
 				s.Logger.Info("TLS code-1: RAM cert regenerated with TLS 1.3")
 			} else {
 				s.Logger.Warn("Failed to regenerate RAM cert: %v", err)
@@ -95,6 +95,6 @@ func (s *Server) tunnelHandshake() error {
 		return nil
 	case <-s.Ctx.Done():
 		server.Close()
-		return fmt.Errorf("tunnelHandshake: context canceled")
+		return fmt.Errorf("TunnelHandshake: context canceled")
 	}
 }

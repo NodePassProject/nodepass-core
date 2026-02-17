@@ -23,13 +23,13 @@ func (c *Common) InitContext() {
 
 func (c *Common) InitTunnelListener() error {
 	if c.TunnelTCPAddr == nil && c.TunnelUDPAddr == nil {
-		return fmt.Errorf("initTunnelListener: nil tunnel address")
+		return fmt.Errorf("InitTunnelListener: nil tunnel address")
 	}
 
 	if c.TunnelTCPAddr != nil && (c.DisableTCP != "1" || c.CoreType != "client") {
 		tunnelListener, err := net.ListenTCP("tcp", c.TunnelTCPAddr)
 		if err != nil {
-			return fmt.Errorf("initTunnelListener: listenTCP failed: %w", err)
+			return fmt.Errorf("InitTunnelListener: listenTCP failed: %w", err)
 		}
 		c.TunnelListener = tunnelListener
 	}
@@ -37,9 +37,9 @@ func (c *Common) InitTunnelListener() error {
 	if c.TunnelUDPAddr != nil && (c.DisableUDP != "1" || c.CoreType != "client") {
 		tunnelUDPConn, err := net.ListenUDP("udp", c.TunnelUDPAddr)
 		if err != nil {
-			return fmt.Errorf("initTunnelListener: listenUDP failed: %w", err)
+			return fmt.Errorf("InitTunnelListener: listenUDP failed: %w", err)
 		}
-		c.TunnelUDPConn = &conn.StatConn{Conn: tunnelUDPConn, RX: &c.UdpRX, TX: &c.UdpTX, Rate: c.RateLimiter}
+		c.TunnelUDPConn = &conn.StatConn{Conn: tunnelUDPConn, RX: &c.UDPRX, TX: &c.UDPTX, Rate: c.RateLimiter}
 	}
 
 	return nil
@@ -47,13 +47,13 @@ func (c *Common) InitTunnelListener() error {
 
 func (c *Common) InitTargetListener() error {
 	if len(c.TargetAddrs) == 0 {
-		return fmt.Errorf("initTargetListener: no target address")
+		return fmt.Errorf("InitTargetListener: no target address")
 	}
 
 	if len(c.TargetTCPAddrs) > 0 && c.DisableTCP != "1" {
 		targetListener, err := net.ListenTCP("tcp", c.TargetTCPAddrs[0])
 		if err != nil {
-			return fmt.Errorf("initTargetListener: listenTCP failed: %w", err)
+			return fmt.Errorf("InitTargetListener: listenTCP failed: %w", err)
 		}
 		c.TargetListener = targetListener
 	}
@@ -61,9 +61,9 @@ func (c *Common) InitTargetListener() error {
 	if len(c.TargetUDPAddrs) > 0 && c.DisableUDP != "1" {
 		targetUDPConn, err := net.ListenUDP("udp", c.TargetUDPAddrs[0])
 		if err != nil {
-			return fmt.Errorf("initTargetListener: listenUDP failed: %w", err)
+			return fmt.Errorf("InitTargetListener: listenUDP failed: %w", err)
 		}
-		c.TargetUDPConn = &conn.StatConn{Conn: targetUDPConn, RX: &c.UdpRX, TX: &c.UdpTX, Rate: c.RateLimiter}
+		c.TargetUDPConn = &conn.StatConn{Conn: targetUDPConn, RX: &c.UDPRX, TX: &c.UDPTX, Rate: c.RateLimiter}
 	}
 
 	return nil
@@ -124,7 +124,7 @@ func (c *Common) Stop() {
 	c.ClearCache()
 }
 
-func (c *Common) Shutdown(ctx context.Context, stopFunc func()) error {
+func (c *Common) CommonShutdown(ctx context.Context, stopFunc func()) error {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -133,7 +133,7 @@ func (c *Common) Shutdown(ctx context.Context, stopFunc func()) error {
 
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("shutdown: context error: %w", ctx.Err())
+		return fmt.Errorf("CommonShutdown: context error: %w", ctx.Err())
 	case <-done:
 		return nil
 	}

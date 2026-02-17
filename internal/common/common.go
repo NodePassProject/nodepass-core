@@ -34,36 +34,36 @@ const (
 )
 
 var (
-	SemaphoreLimit   = getEnvAsInt("NP_SEMAPHORE_LIMIT", 65536)
-	TcpDataBufSize   = getEnvAsInt("NP_TCP_DATA_BUF_SIZE", 16384)
-	UdpDataBufSize   = getEnvAsInt("NP_UDP_DATA_BUF_SIZE", 16384)
-	HandshakeTimeout = getEnvAsDuration("NP_HANDSHAKE_TIMEOUT", 5*time.Second)
-	TcpDialTimeout   = getEnvAsDuration("NP_TCP_DIAL_TIMEOUT", 5*time.Second)
-	UdpDialTimeout   = getEnvAsDuration("NP_UDP_DIAL_TIMEOUT", 5*time.Second)
-	UdpReadTimeout   = getEnvAsDuration("NP_UDP_READ_TIMEOUT", 30*time.Second)
-	PoolGetTimeout   = getEnvAsDuration("NP_POOL_GET_TIMEOUT", 5*time.Second)
-	MinPoolInterval  = getEnvAsDuration("NP_MIN_POOL_INTERVAL", 100*time.Millisecond)
-	MaxPoolInterval  = getEnvAsDuration("NP_MAX_POOL_INTERVAL", 1*time.Second)
-	ReportInterval   = getEnvAsDuration("NP_REPORT_INTERVAL", 5*time.Second)
-	FallbackInterval = getEnvAsDuration("NP_FALLBACK_INTERVAL", 5*time.Minute)
-	ServiceCooldown  = getEnvAsDuration("NP_SERVICE_COOLDOWN", 3*time.Second)
-	ShutdownTimeout  = getEnvAsDuration("NP_SHUTDOWN_TIMEOUT", 5*time.Second)
-	ReloadInterval   = getEnvAsDuration("NP_RELOAD_INTERVAL", 1*time.Hour)
+	SemaphoreLimit   = GetEnvAsInt("NP_SEMAPHORE_LIMIT", 65536)
+	TCPDataBufSize   = GetEnvAsInt("NP_TCP_DATA_BUF_SIZE", 16384)
+	UDPDataBufSize   = GetEnvAsInt("NP_UDP_DATA_BUF_SIZE", 16384)
+	HandshakeTimeout = GetEnvAsDuration("NP_HANDSHAKE_TIMEOUT", 5*time.Second)
+	TCPDialTimeout   = GetEnvAsDuration("NP_TCP_DIAL_TIMEOUT", 5*time.Second)
+	UDPDialTimeout   = GetEnvAsDuration("NP_UDP_DIAL_TIMEOUT", 5*time.Second)
+	UDPReadTimeout   = GetEnvAsDuration("NP_UDP_READ_TIMEOUT", 30*time.Second)
+	PoolGetTimeout   = GetEnvAsDuration("NP_POOL_GET_TIMEOUT", 5*time.Second)
+	MinPoolInterval  = GetEnvAsDuration("NP_MIN_POOL_INTERVAL", 100*time.Millisecond)
+	MaxPoolInterval  = GetEnvAsDuration("NP_MAX_POOL_INTERVAL", 1*time.Second)
+	ReportInterval   = GetEnvAsDuration("NP_REPORT_INTERVAL", 5*time.Second)
+	FallbackInterval = GetEnvAsDuration("NP_FALLBACK_INTERVAL", 5*time.Minute)
+	ServiceCooldown  = GetEnvAsDuration("NP_SERVICE_COOLDOWN", 3*time.Second)
+	ShutdownTimeout  = GetEnvAsDuration("NP_SHUTDOWN_TIMEOUT", 5*time.Second)
+	ReloadInterval   = GetEnvAsDuration("NP_RELOAD_INTERVAL", 1*time.Hour)
 )
 
 type Common struct {
 	TargetIdx        uint64
 	LastFallback     uint64
-	TcpRX            uint64
-	TcpTX            uint64
-	UdpRX            uint64
-	UdpTX            uint64
+	TCPRX            uint64
+	TCPTX            uint64
+	UDPRX            uint64
+	UDPTX            uint64
 	ParsedURL        *url.URL
 	Logger           *logs.Logger
-	DnsCacheTTL      time.Duration
-	DnsCacheEntries  sync.Map
-	TlsCode          string
-	TlsConfig        *tls.Config
+	DNSCacheTTL      time.Duration
+	DNSCacheEntries  sync.Map
+	TLSCode          string
+	TLSConfig        *tls.Config
 	CoreType         string
 	RunMode          string
 	PoolType         string
@@ -81,7 +81,7 @@ type Common struct {
 	TargetTCPAddrs   []*net.TCPAddr
 	TargetUDPAddrs   []*net.UDPAddr
 	BestLatency      int32
-	LbStrategy       string
+	LBStrategy       string
 	TargetListener   *net.TCPListener
 	TunnelListener   net.Listener
 	ControlConn      net.Conn
@@ -102,24 +102,24 @@ type Common struct {
 	RateLimiter      *conn.RateLimiter
 	ReadTimeout      time.Duration
 	BufReader        *bufio.Reader
-	TcpBufferPool    *sync.Pool
-	UdpBufferPool    *sync.Pool
+	TCPBufferPool    *sync.Pool
+	UDPBufferPool    *sync.Pool
 	SignalChan       chan Signal
 	WriteChan        chan []byte
 	VerifyChan       chan struct{}
 	HandshakeStart   time.Time
 	CheckPoint       time.Time
 	SlotLimit        int32
-	TcpSlot          int32
-	UdpSlot          int32
+	TCPSlot          int32
+	UDPSlot          int32
 	Ctx              context.Context
 	Cancel           context.CancelFunc
 }
 
-type dnsCacheEntry struct {
-	tcpAddr   *net.TCPAddr
-	udpAddr   *net.UDPAddr
-	expiredAt time.Time
+type DnsCacheEntry struct {
+	TCPAddr   *net.TCPAddr
+	UDPAddr   *net.UDPAddr
+	ExpiredAt time.Time
 }
 
 type ReaderConn struct {

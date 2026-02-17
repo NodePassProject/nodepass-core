@@ -15,7 +15,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -99,7 +98,8 @@ func (c *Common) HandlePreAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	targetConn, err := net.DialTimeout("tcp", r.URL.Host, TcpDialTimeout)
+	dialFunc := c.GetDialFunc("tcp", TCPDialTimeout)
+	targetConn, err := dialFunc(r.URL.Host)
 	if err != nil {
 		return
 	}
@@ -124,7 +124,7 @@ func (c *Common) Encode(data []byte) []byte {
 func (c *Common) Decode(data []byte) ([]byte, error) {
 	decoded, err := base64.StdEncoding.DecodeString(string(bytes.TrimSuffix(data, []byte{'\n'})))
 	if err != nil {
-		return nil, fmt.Errorf("decode: base64 decode failed: %w", err)
+		return nil, fmt.Errorf("Decode: base64 decode failed: %w", err)
 	}
 	return c.Xor(decoded), nil
 }
@@ -143,7 +143,7 @@ func (c *Common) IncomingVerify() {
 
 	id, testConn, err := c.TunnelPool.IncomingGet(PoolGetTimeout)
 	if err != nil {
-		c.Logger.Error("incomingVerify: incomingGet failed: %v", err)
+		c.Logger.Error("IncomingVerify: incomingGet failed: %v", err)
 		c.Cancel()
 		return
 	}
@@ -152,8 +152,8 @@ func (c *Common) IncomingVerify() {
 	var fingerprint string
 	switch c.CoreType {
 	case "server":
-		if c.TlsConfig != nil && len(c.TlsConfig.Certificates) > 0 {
-			cert := c.TlsConfig.Certificates[0]
+		if c.TLSConfig != nil && len(c.TLSConfig.Certificates) > 0 {
+			cert := c.TLSConfig.Certificates[0]
 			if len(cert.Certificate) > 0 {
 				fingerprint = c.FormatCertFingerprint(cert.Certificate[0])
 			}
@@ -193,7 +193,7 @@ func (c *Common) OutgoingVerify(signal Signal) {
 
 	fingerPrint := signal.Fingerprint
 	if fingerPrint == "" {
-		c.Logger.Error("outgoingVerify: no fingerprint in signal")
+		c.Logger.Error("OutgoingVerify: no fingerprint in signal")
 		c.Cancel()
 		return
 	}
@@ -203,7 +203,7 @@ func (c *Common) OutgoingVerify(signal Signal) {
 
 	testConn, err := c.TunnelPool.OutgoingGet(id, PoolGetTimeout)
 	if err != nil {
-		c.Logger.Error("outgoingVerify: request timeout: %v", err)
+		c.Logger.Error("OutgoingVerify: request timeout: %v", err)
 		c.Cancel()
 		return
 	}
@@ -212,15 +212,15 @@ func (c *Common) OutgoingVerify(signal Signal) {
 	var serverFingerprint, clientFingerprint string
 	switch c.CoreType {
 	case "server":
-		if c.TlsConfig == nil || len(c.TlsConfig.Certificates) == 0 {
-			c.Logger.Error("outgoingVerify: no local certificate")
+		if c.TLSConfig == nil || len(c.TLSConfig.Certificates) == 0 {
+			c.Logger.Error("OutgoingVerify: no local certificate")
 			c.Cancel()
 			return
 		}
 
-		cert := c.TlsConfig.Certificates[0]
+		cert := c.TLSConfig.Certificates[0]
 		if len(cert.Certificate) == 0 {
-			c.Logger.Error("outgoingVerify: empty local certificate")
+			c.Logger.Error("OutgoingVerify: empty local certificate")
 			c.Cancel()
 			return
 		}
@@ -235,7 +235,7 @@ func (c *Common) OutgoingVerify(signal Signal) {
 		state := conn.ConnectionState()
 
 		if len(state.PeerCertificates) == 0 {
-			c.Logger.Error("outgoingVerify: no peer certificates found")
+			c.Logger.Error("OutgoingVerify: no peer certificates found")
 			c.Cancel()
 			return
 		}
@@ -245,7 +245,7 @@ func (c *Common) OutgoingVerify(signal Signal) {
 	}
 
 	if serverFingerprint != clientFingerprint {
-		c.Logger.Error("outgoingVerify: certificate fingerprint mismatch: server: %v - client: %v", serverFingerprint, clientFingerprint)
+		c.Logger.Error("OutgoingVerify: certificate fingerprint mismatch: server: %v - client: %v", serverFingerprint, clientFingerprint)
 		c.Cancel()
 		return
 	}

@@ -17,25 +17,25 @@ import (
 
 type Master struct {
 	common.Common
-	mid           string
-	alias         string
-	prefix        string
-	version       string
-	hostname      string
-	logLevel      string
-	crtPath       string
-	keyPath       string
-	instances     sync.Map
-	server        *http.Server
-	tlsConfig     *tls.Config
-	masterURL     *url.URL
-	statePath     string
-	stateMu       sync.Mutex
-	subscribers   sync.Map
-	notifyChannel chan *InstanceEvent
-	tcpingSem     chan struct{}
-	startTime     time.Time
-	periodicDone  chan struct{}
+	MID           string
+	Alias         string
+	Prefix        string
+	Version       string
+	Hostname      string
+	LogLevel      string
+	CrtPath       string
+	KeyPath       string
+	Instances     sync.Map
+	Server        *http.Server
+	TLSConfig     *tls.Config
+	MasterURL     *url.URL
+	StatePath     string
+	StateMu       sync.Mutex
+	Subscribers   sync.Map
+	NotifyChannel chan *InstanceEvent
+	TCPingSem     chan struct{}
+	StartTime     time.Time
+	PeriodicDone  chan struct{}
 }
 
 type Instance struct {
@@ -83,11 +83,11 @@ type Peer struct {
 }
 
 type InstanceLogWriter struct {
-	instanceID string
-	instance   *Instance
-	target     io.Writer
-	master     *Master
-	checkPoint *regexp.Regexp
+	InstanceID string
+	Instance   *Instance
+	Target     io.Writer
+	Master     *Master
+	CheckPoint *regexp.Regexp
 }
 
 type InstanceEvent struct {

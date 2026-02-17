@@ -2,7 +2,7 @@ package master
 
 import "fmt"
 
-const swaggerUIHTML = `<!DOCTYPE html>
+const SwaggerUIHTML = `<!DOCTYPE html>
 <html>
 <head>
   <title>NodePass API</title>
@@ -22,7 +22,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 </body>
 </html>`
 
-func (m *Master) generateOpenAPISpec() string {
+func (m *Master) GenerateOpenAPISpec() string {
 	return fmt.Sprintf(`{
   "openapi": "3.1.1",
   "info": {
@@ -291,5 +291,5 @@ func (m *Master) generateOpenAPISpec() string {
 	  }
 	}
   }
-}`, openAPIVersion, m.prefix)
+}`, OpenAPIVersion, m.Prefix)
 }

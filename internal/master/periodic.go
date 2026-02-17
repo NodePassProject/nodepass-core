@@ -7,37 +7,37 @@ import (
 	"github.com/NodePassProject/nodepass/internal/common"
 )
 
-func (m *Master) startPeriodicTasks() {
+func (m *Master) StartPeriodicTasks() {
 	ticker := time.NewTicker(common.ReloadInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			m.performPeriodicBackup()
-			m.performPeriodicCleanup()
-			m.performPeriodicRestart()
-		case <-m.periodicDone:
+			m.PerformPeriodicBackup()
+			m.PerformPeriodicCleanup()
+			m.PerformPeriodicRestart()
+		case <-m.PeriodicDone:
 			ticker.Stop()
 			return
 		}
 	}
 }
 
-func (m *Master) performPeriodicBackup() {
-	backupPath := fmt.Sprintf("%s.backup", m.statePath)
+func (m *Master) PerformPeriodicBackup() {
+	backupPath := fmt.Sprintf("%s.backup", m.StatePath)
 
-	if err := m.saveStateToPath(backupPath); err != nil {
-		m.Logger.Error("performPeriodicBackup: backup state failed: %v", err)
+	if err := m.SaveStateToPath(backupPath); err != nil {
+		m.Logger.Error("PerformPeriodicBackup: backup state failed: %v", err)
 	} else {
 		m.Logger.Info("State backup saved: %v", backupPath)
 	}
 }
 
-func (m *Master) performPeriodicCleanup() {
+func (m *Master) PerformPeriodicCleanup() {
 	idInstances := make(map[string][]*Instance)
-	m.instances.Range(func(key, value any) bool {
-		if id := key.(string); id != apiKeyID {
+	m.Instances.Range(func(key, value any) bool {
+		if id := key.(string); id != APIKeyID {
 			idInstances[id] = append(idInstances[id], value.(*Instance))
 		}
 		return true
@@ -61,17 +61,17 @@ func (m *Master) performPeriodicCleanup() {
 			}
 			inst.deleted = true
 			if inst.Status != "stopped" {
-				m.stopInstance(inst)
+				m.StopInstance(inst)
 			}
-			m.instances.Delete(inst.ID)
+			m.Instances.Delete(inst.ID)
 		}
 	}
 }
 
-func (m *Master) performPeriodicRestart() {
+func (m *Master) PerformPeriodicRestart() {
 	var errorInstances []*Instance
-	m.instances.Range(func(key, value any) bool {
-		if id := key.(string); id != apiKeyID {
+	m.Instances.Range(func(key, value any) bool {
+		if id := key.(string); id != APIKeyID {
 			instance := value.(*Instance)
 			if instance.Status == "error" && !instance.deleted {
 				errorInstances = append(errorInstances, instance)
@@ -81,8 +81,8 @@ func (m *Master) performPeriodicRestart() {
 	})
 
 	for _, instance := range errorInstances {
-		m.stopInstance(instance)
-		time.Sleep(baseDuration)
-		m.startInstance(instance)
+		m.StopInstance(instance)
+		time.Sleep(BaseDuration)
+		m.StartInstance(instance)
 	}
 }

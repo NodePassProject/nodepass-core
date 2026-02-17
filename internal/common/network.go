@@ -11,33 +11,33 @@ import (
 func (c *Common) Resolve(network, address string) (any, error) {
 	now := time.Now()
 
-	if val, ok := c.DnsCacheEntries.Load(address); ok {
-		entry := val.(*dnsCacheEntry)
-		if now.Before(entry.expiredAt) {
+	if val, ok := c.DNSCacheEntries.Load(address); ok {
+		entry := val.(*DnsCacheEntry)
+		if now.Before(entry.ExpiredAt) {
 			if network == "tcp" {
-				return entry.tcpAddr, nil
+				return entry.TCPAddr, nil
 			}
-			return entry.udpAddr, nil
+			return entry.UDPAddr, nil
 		}
-		c.DnsCacheEntries.Delete(address)
+		c.DNSCacheEntries.Delete(address)
 	}
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf("resolve: resolveTCPAddr failed: %w", err)
+		return nil, fmt.Errorf("Resolve: resolveTCPAddr failed: %w", err)
 	}
 
 	udpAddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
-		return nil, fmt.Errorf("resolve: resolveUDPAddr failed: %w", err)
+		return nil, fmt.Errorf("Resolve: resolveUDPAddr failed: %w", err)
 	}
 
-	entry := &dnsCacheEntry{
-		tcpAddr:   tcpAddr,
-		udpAddr:   udpAddr,
-		expiredAt: now.Add(c.DnsCacheTTL),
+	entry := &DnsCacheEntry{
+		TCPAddr:   tcpAddr,
+		UDPAddr:   udpAddr,
+		ExpiredAt: now.Add(c.DNSCacheTTL),
 	}
-	c.DnsCacheEntries.LoadOrStore(address, entry)
+	c.DNSCacheEntries.LoadOrStore(address, entry)
 
 	if network == "tcp" {
 		return tcpAddr, nil
@@ -46,8 +46,8 @@ func (c *Common) Resolve(network, address string) (any, error) {
 }
 
 func (c *Common) ClearCache() {
-	c.DnsCacheEntries.Range(func(key, value any) bool {
-		c.DnsCacheEntries.Delete(key)
+	c.DNSCacheEntries.Range(func(key, value any) bool {
+		c.DNSCacheEntries.Delete(key)
 		return true
 	})
 }
@@ -55,7 +55,7 @@ func (c *Common) ClearCache() {
 func (c *Common) ResolveAddr(network, address string) (any, error) {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, fmt.Errorf("invalid address %s: %w", address, err)
+		return nil, fmt.Errorf("ResolveAddr: invalid address %s: %w", address, err)
 	}
 
 	if host == "" || net.ParseIP(host) != nil {
@@ -70,7 +70,7 @@ func (c *Common) ResolveAddr(network, address string) (any, error) {
 
 func (c *Common) ResolveTarget(network string, idx int) (any, error) {
 	if idx < 0 || idx >= len(c.TargetAddrs) {
-		return nil, fmt.Errorf("resolveTarget: index %d out of range", idx)
+		return nil, fmt.Errorf("ResolveTarget: index %d out of range", idx)
 	}
 
 	addr, err := c.ResolveAddr(network, c.TargetAddrs[idx])
@@ -152,6 +152,27 @@ func (c *Common) TcpPing(idx int) int {
 	return 0
 }
 
+func (c *Common) GetDialFunc(network string, timeout time.Duration) func(string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout}
+	if c.DialerIP != DefaultDialerIP && atomic.LoadUint32(&c.DialerFallback) == 0 {
+		if network == "tcp" {
+			dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(c.DialerIP)}
+		} else {
+			dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(c.DialerIP)}
+		}
+	}
+
+	return func(addr string) (net.Conn, error) {
+		conn, err := dialer.Dial(network, addr)
+		if err != nil && dialer.LocalAddr != nil && atomic.CompareAndSwapUint32(&c.DialerFallback, 0, 1) {
+			c.Logger.Error("GetDialFunc: fallback to system auto due to dialer failure: %v", err)
+			dialer.LocalAddr = nil
+			return dialer.Dial(network, addr)
+		}
+		return conn, err
+	}
+}
+
 func (c *Common) DialWithRotation(network string, timeout time.Duration) (net.Conn, error) {
 	addrCount := len(c.TargetAddrs)
 
@@ -166,34 +187,17 @@ func (c *Common) DialWithRotation(network string, timeout time.Duration) (net.Co
 		return ""
 	}
 
-	dialer := &net.Dialer{Timeout: timeout}
-	if c.DialerIP != DefaultDialerIP && atomic.LoadUint32(&c.DialerFallback) == 0 {
-		if network == "tcp" {
-			dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(c.DialerIP)}
-		} else {
-			dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(c.DialerIP)}
-		}
-	}
-
-	tryDial := func(addr string) (net.Conn, error) {
-		conn, err := dialer.Dial(network, addr)
-		if err != nil && dialer.LocalAddr != nil && atomic.CompareAndSwapUint32(&c.DialerFallback, 0, 1) {
-			c.Logger.Error("dialWithRotation: fallback to system auto due to dialer failure: %v", err)
-			dialer.LocalAddr = nil
-			return dialer.Dial(network, addr)
-		}
-		return conn, err
-	}
+	tryDial := c.GetDialFunc(network, timeout)
 
 	if addrCount == 1 {
 		if addr := getAddr(0); addr != "" {
 			return tryDial(addr)
 		}
-		return nil, fmt.Errorf("dialWithRotation: invalid target address")
+		return nil, fmt.Errorf("DialWithRotation: invalid target address")
 	}
 
 	var startIdx int
-	switch c.LbStrategy {
+	switch c.LBStrategy {
 	case "1":
 		startIdx = int(atomic.LoadUint64(&c.TargetIdx) % uint64(addrCount))
 	case "2":
@@ -217,7 +221,7 @@ func (c *Common) DialWithRotation(network string, timeout time.Duration) (net.Co
 		}
 		conn, err := tryDial(addr)
 		if err == nil {
-			if i > 0 && (c.LbStrategy == "1" || c.LbStrategy == "2") {
+			if i > 0 && (c.LBStrategy == "1" || c.LBStrategy == "2") {
 				atomic.StoreUint64(&c.TargetIdx, uint64(targetIdx))
 			}
 			return conn, nil
@@ -225,5 +229,5 @@ func (c *Common) DialWithRotation(network string, timeout time.Duration) (net.Co
 		lastErr = err
 	}
 
-	return nil, fmt.Errorf("dialWithRotation: all %d targets failed: %w", addrCount, lastErr)
+	return nil, fmt.Errorf("DialWithRotation: all %d targets failed: %w", addrCount, lastErr)
 }

@@ -1,9 +1,9 @@
 package common
 
 import (
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
-	"encoding/hex"
 	"net"
 	"strconv"
 	"strings"
@@ -13,7 +13,7 @@ import (
 func (c *Common) GetAddress() error {
 	tunnelAddr := c.ParsedURL.Host
 	if tunnelAddr == "" {
-		return fmt.Errorf("getAddress: no valid tunnel address found")
+		return fmt.Errorf("GetAddress: no valid tunnel address found")
 	}
 
 	c.TunnelAddr = tunnelAddr
@@ -23,19 +23,19 @@ func (c *Common) GetAddress() error {
 
 	tcpAddr, err := c.ResolveAddr("tcp", tunnelAddr)
 	if err != nil {
-		return fmt.Errorf("getAddress: resolveTCPAddr failed: %w", err)
+		return fmt.Errorf("GetAddress: resolveTCPAddr failed: %w", err)
 	}
 	c.TunnelTCPAddr = tcpAddr.(*net.TCPAddr)
 
 	udpAddr, err := c.ResolveAddr("udp", tunnelAddr)
 	if err != nil {
-		return fmt.Errorf("getAddress: resolveUDPAddr failed: %w", err)
+		return fmt.Errorf("GetAddress: resolveUDPAddr failed: %w", err)
 	}
 	c.TunnelUDPAddr = udpAddr.(*net.UDPAddr)
 
 	targetAddr := strings.TrimPrefix(c.ParsedURL.Path, "/")
 	if targetAddr == "" {
-		return fmt.Errorf("getAddress: no valid target address found")
+		return fmt.Errorf("GetAddress: no valid target address found")
 	}
 
 	addrList := strings.Split(targetAddr, ",")
@@ -51,12 +51,12 @@ func (c *Common) GetAddress() error {
 
 		tcpAddr, err := c.ResolveAddr("tcp", addr)
 		if err != nil {
-			return fmt.Errorf("getAddress: resolveTCPAddr failed for %s: %w", addr, err)
+			return fmt.Errorf("GetAddress: resolveTCPAddr failed for %s: %w", addr, err)
 		}
 
 		udpAddr, err := c.ResolveAddr("udp", addr)
 		if err != nil {
-			return fmt.Errorf("getAddress: resolveUDPAddr failed for %s: %w", addr, err)
+			return fmt.Errorf("GetAddress: resolveUDPAddr failed for %s: %w", addr, err)
 		}
 
 		tempTCPAddrs = append(tempTCPAddrs, tcpAddr.(*net.TCPAddr))
@@ -65,7 +65,7 @@ func (c *Common) GetAddress() error {
 	}
 
 	if len(tempTCPAddrs) == 0 || len(tempUDPAddrs) == 0 || len(tempTCPAddrs) != len(tempUDPAddrs) {
-		return fmt.Errorf("getAddress: no valid target address found")
+		return fmt.Errorf("GetAddress: no valid target address found")
 	}
 
 	c.TargetAddrs = tempRawAddrs
@@ -76,18 +76,18 @@ func (c *Common) GetAddress() error {
 	tunnelPort := c.TunnelTCPAddr.Port
 	for _, targetAddr := range c.TargetTCPAddrs {
 		if targetAddr.Port == tunnelPort && (targetAddr.IP.IsLoopback() || c.TunnelTCPAddr.IP.IsUnspecified()) {
-			return fmt.Errorf("getAddress: tunnel port %d conflicts with target address %s", tunnelPort, targetAddr.String())
+			return fmt.Errorf("GetAddress: tunnel port %d conflicts with target address %s", tunnelPort, targetAddr.String())
 		}
 	}
 
 	return nil
 }
 
-func (c *Common) getCoreType() {
+func (c *Common) GetCoreType() {
 	c.CoreType = c.ParsedURL.Scheme
 }
 
-func (c *Common) getTunnelKey() {
+func (c *Common) GetTunnelKey() {
 	if key := c.ParsedURL.User.Username(); key != "" {
 		c.TunnelKey = key
 	} else {
@@ -97,17 +97,17 @@ func (c *Common) getTunnelKey() {
 	}
 }
 
-func (c *Common) getDNSTTL() {
+func (c *Common) GetDNSTTL() {
 	if dns := c.ParsedURL.Query().Get("dns"); dns != "" {
 		if ttl, err := time.ParseDuration(dns); err == nil && ttl > 0 {
-			c.DnsCacheTTL = ttl
+			c.DNSCacheTTL = ttl
 		}
 	} else {
-		c.DnsCacheTTL = DefaultDNSTTL
+		c.DNSCacheTTL = DefaultDNSTTL
 	}
 }
 
-func (c *Common) getServerName() {
+func (c *Common) GetServerName() {
 	if serverName := c.ParsedURL.Query().Get("sni"); serverName != "" {
 		c.ServerName = serverName
 		return
@@ -117,15 +117,15 @@ func (c *Common) getServerName() {
 	}
 }
 
-func (c *Common) getLBStrategy() {
+func (c *Common) GetLBStrategy() {
 	if lbStrategy := c.ParsedURL.Query().Get("lbs"); lbStrategy != "" {
-		c.LbStrategy = lbStrategy
+		c.LBStrategy = lbStrategy
 	} else {
-		c.LbStrategy = DefaultLBStrategy
+		c.LBStrategy = DefaultLBStrategy
 	}
 }
 
-func (c *Common) getPoolCapacity() {
+func (c *Common) GetPoolCapacity() {
 	if min := c.ParsedURL.Query().Get("min"); min != "" {
 		if value, err := strconv.Atoi(min); err == nil && value > 0 {
 			c.MinPoolCapacity = value
@@ -143,7 +143,7 @@ func (c *Common) getPoolCapacity() {
 	}
 }
 
-func (c *Common) getRunMode() {
+func (c *Common) GetRunMode() {
 	if mode := c.ParsedURL.Query().Get("mode"); mode != "" {
 		c.RunMode = mode
 	} else {
@@ -151,30 +151,30 @@ func (c *Common) getRunMode() {
 	}
 }
 
-func (c *Common) getPoolType() {
+func (c *Common) GetPoolType() {
 	if poolType := c.ParsedURL.Query().Get("type"); poolType != "" {
 		c.PoolType = poolType
 	} else {
 		c.PoolType = DefaultPoolType
 	}
-	if c.PoolType == "1" && c.TlsCode == "0" {
-		c.TlsCode = "1"
+	if c.PoolType == "1" && c.TLSCode == "0" {
+		c.TLSCode = "1"
 	}
 }
 
-func (c *Common) getDialerIP() {
+func (c *Common) GetDialerIP() {
 	if dialerIP := c.ParsedURL.Query().Get("dial"); dialerIP != "" && dialerIP != "auto" {
 		if ip := net.ParseIP(dialerIP); ip != nil {
 			c.DialerIP = dialerIP
 			return
 		} else {
-			c.Logger.Error("getDialerIP: fallback to system auto due to invalid IP address: %v", dialerIP)
+			c.Logger.Error("GetDialerIP: fallback to system auto due to invalid IP address: %v", dialerIP)
 		}
 	}
 	c.DialerIP = DefaultDialerIP
 }
 
-func (c *Common) getReadTimeout() {
+func (c *Common) GetReadTimeout() {
 	if timeout := c.ParsedURL.Query().Get("read"); timeout != "" {
 		if value, err := time.ParseDuration(timeout); err == nil && value > 0 {
 			c.ReadTimeout = value
@@ -184,7 +184,7 @@ func (c *Common) getReadTimeout() {
 	}
 }
 
-func (c *Common) getRateLimit() {
+func (c *Common) GetRateLimit() {
 	if limit := c.ParsedURL.Query().Get("rate"); limit != "" {
 		if value, err := strconv.Atoi(limit); err == nil && value > 0 {
 			c.RateLimit = value * 125000
@@ -194,7 +194,7 @@ func (c *Common) getRateLimit() {
 	}
 }
 
-func (c *Common) getSlotLimit() {
+func (c *Common) GetSlotLimit() {
 	if slot := c.ParsedURL.Query().Get("slot"); slot != "" {
 		if value, err := strconv.Atoi(slot); err == nil && value > 0 {
 			c.SlotLimit = int32(value)
@@ -204,7 +204,7 @@ func (c *Common) getSlotLimit() {
 	}
 }
 
-func (c *Common) getProxyProtocol() {
+func (c *Common) GetProxyProtocol() {
 	if protocol := c.ParsedURL.Query().Get("proxy"); protocol != "" {
 		c.ProxyProtocol = protocol
 	} else {
@@ -212,7 +212,7 @@ func (c *Common) getProxyProtocol() {
 	}
 }
 
-func (c *Common) getBlockProtocol() {
+func (c *Common) GetBlockProtocol() {
 	if protocol := c.ParsedURL.Query().Get("block"); protocol != "" {
 		c.BlockProtocol = protocol
 	} else {
@@ -223,7 +223,7 @@ func (c *Common) getBlockProtocol() {
 	c.BlockTLS = strings.Contains(c.BlockProtocol, "3")
 }
 
-func (c *Common) getTCPStrategy() {
+func (c *Common) GetTCPStrategy() {
 	if tcpStrategy := c.ParsedURL.Query().Get("notcp"); tcpStrategy != "" {
 		c.DisableTCP = tcpStrategy
 	} else {
@@ -231,7 +231,7 @@ func (c *Common) getTCPStrategy() {
 	}
 }
 
-func (c *Common) getUDPStrategy() {
+func (c *Common) GetUDPStrategy() {
 	if udpStrategy := c.ParsedURL.Query().Get("noudp"); udpStrategy != "" {
 		c.DisableUDP = udpStrategy
 	} else {
@@ -244,22 +244,22 @@ func (c *Common) InitConfig() error {
 		return err
 	}
 
-	c.getCoreType()
-	c.getDNSTTL()
-	c.getTunnelKey()
-	c.getPoolCapacity()
-	c.getServerName()
-	c.getLBStrategy()
-	c.getRunMode()
-	c.getPoolType()
-	c.getDialerIP()
-	c.getReadTimeout()
-	c.getRateLimit()
-	c.getSlotLimit()
-	c.getProxyProtocol()
-	c.getBlockProtocol()
-	c.getTCPStrategy()
-	c.getUDPStrategy()
+	c.GetCoreType()
+	c.GetDNSTTL()
+	c.GetTunnelKey()
+	c.GetPoolCapacity()
+	c.GetServerName()
+	c.GetLBStrategy()
+	c.GetRunMode()
+	c.GetPoolType()
+	c.GetDialerIP()
+	c.GetReadTimeout()
+	c.GetRateLimit()
+	c.GetSlotLimit()
+	c.GetProxyProtocol()
+	c.GetBlockProtocol()
+	c.GetTCPStrategy()
+	c.GetUDPStrategy()
 
 	return nil
 }

@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-func (m *Master) getMasterInfo() map[string]any {
+func (m *Master) GetMasterInfo() map[string]any {
 	info := map[string]any{
-		"mid":        m.mid,
-		"alias":      m.alias,
+		"mid":        m.MID,
+		"alias":      m.Alias,
 		"os":         runtime.GOOS,
 		"arch":       runtime.GOARCH,
 		"noc":        runtime.NumCPU(),
@@ -26,17 +26,17 @@ func (m *Master) getMasterInfo() map[string]any {
 		"diskr":      uint64(0),
 		"diskw":      uint64(0),
 		"sysup":      uint64(0),
-		"ver":        m.version,
-		"name":       m.hostname,
-		"uptime":     uint64(time.Since(m.startTime).Seconds()),
-		"log":        m.logLevel,
-		"tls":        m.TlsCode,
-		"crt":        m.crtPath,
-		"key":        m.keyPath,
+		"ver":        m.Version,
+		"name":       m.Hostname,
+		"uptime":     uint64(time.Since(m.StartTime).Seconds()),
+		"log":        m.LogLevel,
+		"tls":        m.TLSConfig,
+		"crt":        m.CrtPath,
+		"key":        m.KeyPath,
 	}
 
 	if runtime.GOOS == "linux" {
-		sysInfo := getLinuxSysInfo()
+		sysInfo := GetLinuxSysInfo()
 		info["cpu"] = sysInfo.CPU
 		info["mem_total"] = sysInfo.MemTotal
 		info["mem_used"] = sysInfo.MemUsed
@@ -52,7 +52,7 @@ func (m *Master) getMasterInfo() map[string]any {
 	return info
 }
 
-func getLinuxSysInfo() SystemInfo {
+func GetLinuxSysInfo() SystemInfo {
 	info := SystemInfo{
 		CPU:       -1,
 		MemTotal:  0,
@@ -91,7 +91,7 @@ func getLinuxSysInfo() SystemInfo {
 		return
 	}
 	idle1, total1 := readStat()
-	time.Sleep(baseDuration)
+	time.Sleep(BaseDuration)
 	idle2, total2 := readStat()
 	if deltaIdle, deltaTotal := idle2-idle1, total2-total1; deltaTotal > 0 {
 		info.CPU = min(int((deltaTotal-deltaIdle)*100/deltaTotal), 100)

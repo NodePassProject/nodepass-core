@@ -13,11 +13,11 @@ func (c *Common) SendProxyV1Header(ip string, conn net.Conn) error {
 
 	clientAddr, err := net.ResolveTCPAddr("tcp", ip)
 	if err != nil {
-		return fmt.Errorf("sendProxyV1Header: resolveTCPAddr failed: %w", err)
+		return fmt.Errorf("SendProxyV1Header: resolveTCPAddr failed: %w", err)
 	}
 	remoteAddr, ok := conn.RemoteAddr().(*net.TCPAddr)
 	if !ok {
-		return fmt.Errorf("sendProxyV1Header: remote address is not TCPAddr")
+		return fmt.Errorf("SendProxyV1Header: remote address is not TCPAddr")
 	}
 
 	var protocol string
@@ -27,7 +27,7 @@ func (c *Common) SendProxyV1Header(ip string, conn net.Conn) error {
 	case clientAddr.IP.To16() != nil && remoteAddr.IP.To16() != nil:
 		protocol = "TCP6"
 	default:
-		return fmt.Errorf("sendProxyV1Header: unsupported IP protocol for PROXY v1")
+		return fmt.Errorf("SendProxyV1Header: unsupported IP protocol for PROXY v1")
 	}
 
 	if _, err = fmt.Fprintf(conn, "PROXY %s %s %s %d %d\r\n",
@@ -36,7 +36,7 @@ func (c *Common) SendProxyV1Header(ip string, conn net.Conn) error {
 		remoteAddr.IP.String(),
 		clientAddr.Port,
 		remoteAddr.Port); err != nil {
-		return fmt.Errorf("sendProxyV1Header: fprintf failed: %w", err)
+		return fmt.Errorf("SendProxyV1Header: fprintf failed: %w", err)
 	}
 
 	return nil

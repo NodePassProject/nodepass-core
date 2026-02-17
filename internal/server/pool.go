@@ -3,20 +3,20 @@ package server
 import (
 	"fmt"
 
+	"github.com/NodePassProject/nodepass/internal/common"
 	"github.com/NodePassProject/nph2"
 	"github.com/NodePassProject/npws"
 	"github.com/NodePassProject/pool"
 	"github.com/NodePassProject/quic"
-	"github.com/NodePassProject/nodepass/internal/common"
 )
 
-func (s *Server) initTunnelPool() error {
+func (s *Server) InitTunnelPool() error {
 	switch s.PoolType {
 	case "0":
 		tcpPool := pool.NewServerPool(
 			s.MaxPoolCapacity,
 			s.ClientIP,
-			s.TlsConfig,
+			s.TLSConfig,
 			s.TunnelListener,
 			common.ReportInterval)
 		go tcpPool.ServerManager()
@@ -25,7 +25,7 @@ func (s *Server) initTunnelPool() error {
 		quicPool := quic.NewServerPool(
 			s.MaxPoolCapacity,
 			s.ClientIP,
-			s.TlsConfig,
+			s.TLSConfig,
 			s.TunnelUDPAddr.String(),
 			common.ReportInterval)
 		go quicPool.ServerManager()
@@ -34,7 +34,7 @@ func (s *Server) initTunnelPool() error {
 		websocketPool := npws.NewServerPool(
 			s.MaxPoolCapacity,
 			"",
-			s.TlsConfig,
+			s.TLSConfig,
 			s.TunnelListener,
 			common.ReportInterval)
 		go websocketPool.ServerManager()
@@ -43,13 +43,13 @@ func (s *Server) initTunnelPool() error {
 		http2Pool := nph2.NewServerPool(
 			s.MaxPoolCapacity,
 			s.ClientIP,
-			s.TlsConfig,
+			s.TLSConfig,
 			s.TunnelListener,
 			common.ReportInterval)
 		go http2Pool.ServerManager()
 		s.TunnelPool = http2Pool
 	default:
-		return fmt.Errorf("initTunnelPool: unknown pool type: %s", s.PoolType)
+		return fmt.Errorf("InitTunnelPool: unknown pool type: %s", s.PoolType)
 	}
 	return nil
 }

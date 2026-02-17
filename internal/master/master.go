@@ -20,25 +20,25 @@ import (
 )
 
 const (
-	defaultAPIPath  = "/api"
-	openAPIVersion  = "v1"
-	nextMCPVersion  = "v2"
-	mcpVersion      = "2025-11-25"
-	stateFilePath   = "gob"
-	stateFileName   = "nodepass.gob"
-	exportFileName  = "nodepass.json"
-	sseRetryTime    = 3000
-	apiKeyID        = "********"
-	tcpingSemLimit  = 10
-	baseDuration    = 100 * time.Millisecond
-	gracefulTimeout = 5 * time.Second
-	maxValueLen     = 256
+	DefaultAPIPath  = "/api"
+	OpenAPIVersion  = "v1"
+	NextMCPVersion  = "v2"
+	MCPVersion      = "2025-11-25"
+	StateFilePath   = "gob"
+	StateFileName   = "nodepass.gob"
+	ExportFileName  = "nodepass.json"
+	SSERetryTime    = 3000
+	APIKeyID        = "********"
+	PingSemLimit    = 10
+	BaseDuration    = 100 * time.Millisecond
+	GracefulTimeout = 5 * time.Second
+	MaxValueLen     = 256
 )
 
 func NewMaster(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger *logs.Logger, version string) (*Master, error) {
 	host, err := net.ResolveTCPAddr("tcp", parsedURL.Host)
 	if err != nil {
-		return nil, fmt.Errorf("newMaster: resolve host failed: %w", err)
+		return nil, fmt.Errorf("NewMaster: resolve host failed: %w", err)
 	}
 
 	var hostname string
@@ -50,7 +50,7 @@ func NewMaster(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger
 
 	prefix := parsedURL.Path
 	if prefix == "" || prefix == "/" {
-		prefix = defaultAPIPath
+		prefix = DefaultAPIPath
 	} else {
 		prefix = strings.TrimRight(prefix, "/")
 	}
@@ -60,56 +60,55 @@ func NewMaster(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger
 
 	master := &Master{
 		Common: common.Common{
-			TlsCode: tlsCode,
+			TLSCode: tlsCode,
 			Logger:  logger,
 		},
-		prefix:        fmt.Sprintf("%s/%s", prefix, openAPIVersion),
-		version:       version,
-		logLevel:      parsedURL.Query().Get("log"),
-		crtPath:       parsedURL.Query().Get("crt"),
-		keyPath:       parsedURL.Query().Get("key"),
-		hostname:      hostname,
-		tlsConfig:     tlsConfig,
-		masterURL:     parsedURL,
-		statePath:     filepath.Join(baseDir, stateFilePath, stateFileName),
-		notifyChannel: make(chan *InstanceEvent, common.SemaphoreLimit),
-		tcpingSem:     make(chan struct{}, tcpingSemLimit),
-		startTime:     time.Now(),
-		periodicDone:  make(chan struct{}),
+		Prefix:        fmt.Sprintf("%s/%s", prefix, OpenAPIVersion),
+		Version:       version,
+		LogLevel:      parsedURL.Query().Get("log"),
+		CrtPath:       parsedURL.Query().Get("crt"),
+		KeyPath:       parsedURL.Query().Get("key"),
+		Hostname:      hostname,
+		TLSConfig:     tlsConfig,
+		MasterURL:     parsedURL,
+		StatePath:     filepath.Join(baseDir, StateFilePath, StateFileName),
+		NotifyChannel: make(chan *InstanceEvent, common.SemaphoreLimit),
+		TCPingSem:     make(chan struct{}, PingSemLimit),
+		StartTime:     time.Now(),
+		PeriodicDone:  make(chan struct{}),
 	}
 	master.TunnelTCPAddr = host
 
-	master.loadState()
+	master.LoadState()
 
-	go master.startEventDispatcher()
+	go master.StartEventDispatcher()
 
 	return master, nil
 }
 
 func (m *Master) Run() {
-	m.Logger.Info("Master started: %v%v", m.TunnelTCPAddr, m.prefix)
-
-	apiKey, ok := m.findInstance(apiKeyID)
+	m.Logger.Info("Master started: %v%v", m.TunnelTCPAddr, m.Prefix)
+	apiKey, ok := m.FindInstance(APIKeyID)
 	if !ok {
 		apiKey = &Instance{
-			ID:     apiKeyID,
-			URL:    generateAPIKey(),
-			Config: generateMID(),
+			ID:     APIKeyID,
+			URL:    GenerateAPIKey(),
+			Config: GenerateMID(),
 			Meta:   Meta{Tags: make(map[string]string)},
 		}
-		m.instances.Store(apiKeyID, apiKey)
-		m.saveState()
+		m.Instances.Store(APIKeyID, apiKey)
+		m.SaveState()
 		fmt.Printf("%s  \033[32mINFO\033[0m  API Key created: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), apiKey.URL)
 	} else {
-		m.alias = apiKey.Alias
+		m.Alias = apiKey.Alias
 
 		if apiKey.Config == "" {
-			apiKey.Config = generateMID()
-			m.instances.Store(apiKeyID, apiKey)
-			m.saveState()
+			apiKey.Config = GenerateMID()
+			m.Instances.Store(APIKeyID, apiKey)
+			m.SaveState()
 			m.Logger.Info("Master ID created: %v", apiKey.Config)
 		}
-		m.mid = apiKey.Config
+		m.MID = apiKey.Config
 
 		fmt.Printf("%s  \033[32mINFO\033[0m  API Key loaded: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), apiKey.URL)
 	}
@@ -117,38 +116,38 @@ func (m *Master) Run() {
 	mux := http.NewServeMux()
 
 	protectedEndpoints := map[string]http.HandlerFunc{
-		fmt.Sprintf("%s/instances", m.prefix):  m.handleInstances,
-		fmt.Sprintf("%s/instances/", m.prefix): m.handleInstanceDetail,
-		fmt.Sprintf("%s/events", m.prefix):     m.handleSSE,
-		fmt.Sprintf("%s/info", m.prefix):       m.handleInfo,
-		fmt.Sprintf("%s/tcping", m.prefix):     m.handleTCPing,
+		fmt.Sprintf("%s/instances", m.Prefix):  m.HandleInstances,
+		fmt.Sprintf("%s/instances/", m.Prefix): m.HandleInstanceDetail,
+		fmt.Sprintf("%s/events", m.Prefix):     m.HandleSSE,
+		fmt.Sprintf("%s/info", m.Prefix):       m.HandleInfo,
+		fmt.Sprintf("%s/tcping", m.Prefix):     m.HandleTCPing,
 
-		strings.TrimSuffix(m.prefix, "/"+openAPIVersion) + "/" + nextMCPVersion: m.handleMCP,
+		strings.TrimSuffix(m.Prefix, "/"+OpenAPIVersion) + "/" + NextMCPVersion: m.HandleMCP,
 	}
 
 	publicEndpoints := map[string]http.HandlerFunc{
-		fmt.Sprintf("%s/openapi.json", m.prefix): m.handleOpenAPISpec,
-		fmt.Sprintf("%s/docs", m.prefix):         m.handleSwaggerUI,
+		fmt.Sprintf("%s/openapi.json", m.Prefix): m.HandleOpenAPISpec,
+		fmt.Sprintf("%s/docs", m.Prefix):         m.HandleSwaggerUI,
 	}
 
 	apiKeyMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			setCorsHeaders(w)
+			SetCorsHeaders(w)
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
 
-			apiKeyInstance, keyExists := m.findInstance(apiKeyID)
+			apiKeyInstance, keyExists := m.FindInstance(APIKeyID)
 			if keyExists && apiKeyInstance.URL != "" {
 				reqAPIKey := r.Header.Get("X-API-Key")
 				if reqAPIKey == "" {
-					httpError(w, "Unauthorized: API key required", http.StatusUnauthorized)
+					HTTPError(w, "Unauthorized: API key required", http.StatusUnauthorized)
 					return
 				}
 
 				if reqAPIKey != apiKeyInstance.URL {
-					httpError(w, "Unauthorized: Invalid API key", http.StatusUnauthorized)
+					HTTPError(w, "Unauthorized: Invalid API key", http.StatusUnauthorized)
 					return
 				}
 			}
@@ -159,7 +158,7 @@ func (m *Master) Run() {
 
 	corsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			setCorsHeaders(w)
+			SetCorsHeaders(w)
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -176,26 +175,26 @@ func (m *Master) Run() {
 		mux.HandleFunc(path, corsMiddleware(handler))
 	}
 
-	m.server = &http.Server{
+	m.Server = &http.Server{
 		Addr:      m.TunnelTCPAddr.String(),
 		ErrorLog:  m.Logger.StdLogger(),
 		Handler:   mux,
-		TLSConfig: m.tlsConfig,
+		TLSConfig: m.TLSConfig,
 	}
 
 	go func() {
 		var err error
-		if m.tlsConfig != nil {
-			err = m.server.ListenAndServeTLS("", "")
+		if m.TLSConfig != nil {
+			err = m.Server.ListenAndServeTLS("", "")
 		} else {
-			err = m.server.ListenAndServe()
+			err = m.Server.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			m.Logger.Error("run: listen failed: %v", err)
+			m.Logger.Error("Run: listen failed: %v", err)
 		}
 	}()
 
-	go m.startPeriodicTasks()
+	go m.StartPeriodicTasks()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	<-ctx.Done()
@@ -211,17 +210,17 @@ func (m *Master) Run() {
 }
 
 func (m *Master) MasterShutdown(ctx context.Context) error {
-	return m.Shutdown(ctx, func() {
-		m.shutdownSSEConnections()
+	return m.CommonShutdown(ctx, func() {
+		m.ShutdownSSEConnections()
 
 		var wg sync.WaitGroup
-		m.instances.Range(func(key, value any) bool {
+		m.Instances.Range(func(key, value any) bool {
 			instance := value.(*Instance)
 			if instance.Status != "stopped" && instance.cmd != nil && instance.cmd.Process != nil {
 				wg.Add(1)
 				go func(inst *Instance) {
 					defer wg.Done()
-					m.stopInstance(inst)
+					m.StopInstance(inst)
 				}(instance)
 			}
 			return true
@@ -229,18 +228,18 @@ func (m *Master) MasterShutdown(ctx context.Context) error {
 
 		wg.Wait()
 
-		close(m.periodicDone)
+		close(m.PeriodicDone)
 
-		close(m.notifyChannel)
+		close(m.NotifyChannel)
 
-		if err := m.saveState(); err != nil {
-			m.Logger.Error("shutdown: save gob failed: %v", err)
+		if err := m.SaveState(); err != nil {
+			m.Logger.Error("MasterShutdown: save gob failed: %v", err)
 		} else {
-			m.Logger.Info("Instances saved: %v", m.statePath)
+			m.Logger.Info("Instances saved: %v", m.StatePath)
 		}
 
-		if err := m.server.Shutdown(ctx); err != nil {
-			m.Logger.Error("shutdown: api shutdown error: %v", err)
+		if err := m.Server.Shutdown(ctx); err != nil {
+			m.Logger.Error("MasterShutdown: api shutdown error: %v", err)
 		}
 	})
 }

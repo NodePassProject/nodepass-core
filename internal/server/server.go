@@ -22,28 +22,28 @@ func NewServer(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger
 	server := &Server{
 		Common: common.Common{
 			ParsedURL:  parsedURL,
-			TlsCode:    tlsCode,
-			TlsConfig:  tlsConfig,
+			TLSCode:    tlsCode,
+			TLSConfig:  tlsConfig,
 			Logger:     logger,
 			SignalChan: make(chan common.Signal, common.SemaphoreLimit),
 			WriteChan:  make(chan []byte, common.SemaphoreLimit),
 			VerifyChan: make(chan struct{}),
-			TcpBufferPool: &sync.Pool{
+			TCPBufferPool: &sync.Pool{
 				New: func() any {
-					buf := make([]byte, common.TcpDataBufSize)
+					buf := make([]byte, common.TCPDataBufSize)
 					return &buf
 				},
 			},
-			UdpBufferPool: &sync.Pool{
+			UDPBufferPool: &sync.Pool{
 				New: func() any {
-					buf := make([]byte, common.UdpDataBufSize)
+					buf := make([]byte, common.UDPDataBufSize)
 					return &buf
 				},
 			},
 		},
 	}
 	if err := server.InitConfig(); err != nil {
-		return nil, fmt.Errorf("newServer: initConfig failed: %w", err)
+		return nil, fmt.Errorf("NewServer: initConfig failed: %w", err)
 	}
 	server.InitRateLimiter()
 	return server, nil
@@ -52,7 +52,7 @@ func NewServer(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger
 func (s *Server) Run() {
 	logInfo := func(prefix string) {
 		s.Logger.Info("%v: server://%v@%v/%v?dns=%v&lbs=%v&max=%v&mode=%v&type=%v&dial=%v&read=%v&rate=%v&slot=%v&proxy=%v&block=%v&notcp=%v&noudp=%v",
-			prefix, s.TunnelKey, s.TunnelTCPAddr, s.GetTargetAddrsString(), s.DnsCacheTTL, s.LbStrategy, s.MaxPoolCapacity,
+			prefix, s.TunnelKey, s.TunnelTCPAddr, s.GetTargetAddrsString(), s.DNSCacheTTL, s.LBStrategy, s.MaxPoolCapacity,
 			s.RunMode, s.PoolType, s.DialerIP, s.ReadTimeout, s.RateLimit/125000, s.SlotLimit,
 			s.ProxyProtocol, s.BlockProtocol, s.DisableTCP, s.DisableUDP)
 	}
@@ -62,7 +62,7 @@ func (s *Server) Run() {
 
 	go func() {
 		for ctx.Err() == nil {
-			if err := s.start(); err != nil && err != io.EOF {
+			if err := s.Start(); err != nil && err != io.EOF {
 				s.Logger.Error("Server error: %v", err)
 				s.Stop()
 				select {
@@ -80,18 +80,18 @@ func (s *Server) Run() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), common.ShutdownTimeout)
 	defer cancel()
-	if err := s.Shutdown(shutdownCtx, s.Stop); err != nil {
+	if err := s.CommonShutdown(shutdownCtx, s.Stop); err != nil {
 		s.Logger.Error("Server shutdown error: %v", err)
 	} else {
 		s.Logger.Info("Server shutdown complete")
 	}
 }
 
-func (s *Server) start() error {
+func (s *Server) Start() error {
 	s.InitContext()
 
 	if err := s.InitTunnelListener(); err != nil {
-		return fmt.Errorf("start: initTunnelListener failed: %w", err)
+		return fmt.Errorf("Start: initTunnelListener failed: %w", err)
 	}
 
 	if s.TunnelUDPConn != nil {
@@ -101,7 +101,7 @@ func (s *Server) start() error {
 	switch s.RunMode {
 	case "1":
 		if err := s.InitTargetListener(); err != nil {
-			return fmt.Errorf("start: initTargetListener failed: %w", err)
+			return fmt.Errorf("Start: initTargetListener failed: %w", err)
 		}
 		s.DataFlow = "-"
 	case "2":
@@ -118,17 +118,17 @@ func (s *Server) start() error {
 
 	s.Logger.Info("Pending tunnel handshake...")
 	s.HandshakeStart = time.Now()
-	if err := s.tunnelHandshake(); err != nil {
-		return fmt.Errorf("start: tunnelHandshake failed: %w", err)
+	if err := s.TunnelHandshake(); err != nil {
+		return fmt.Errorf("Start: tunnelHandshake failed: %w", err)
 	}
 
-	if err := s.initTunnelPool(); err != nil {
-		return fmt.Errorf("start: initTunnelPool failed: %w", err)
+	if err := s.InitTunnelPool(); err != nil {
+		return fmt.Errorf("Start: initTunnelPool failed: %w", err)
 	}
 
 	s.Logger.Info("Getting tunnel pool ready...")
 	if err := s.SetControlConn(); err != nil {
-		return fmt.Errorf("start: setControlConn failed: %w", err)
+		return fmt.Errorf("Start: setControlConn failed: %w", err)
 	}
 
 	if s.DataFlow == "-" {
@@ -136,7 +136,7 @@ func (s *Server) start() error {
 	}
 
 	if err := s.CommonControl(); err != nil {
-		return fmt.Errorf("start: commonControl failed: %w", err)
+		return fmt.Errorf("Start: commonControl failed: %w", err)
 	}
 	return nil
 }

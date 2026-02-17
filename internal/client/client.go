@@ -25,22 +25,22 @@ func NewClient(parsedURL *url.URL, logger *logs.Logger) (*Client, error) {
 			SignalChan: make(chan common.Signal, common.SemaphoreLimit),
 			WriteChan:  make(chan []byte, common.SemaphoreLimit),
 			VerifyChan: make(chan struct{}),
-			TcpBufferPool: &sync.Pool{
+			TCPBufferPool: &sync.Pool{
 				New: func() any {
-					buf := make([]byte, common.TcpDataBufSize)
+					buf := make([]byte, common.TCPDataBufSize)
 					return &buf
 				},
 			},
-			UdpBufferPool: &sync.Pool{
+			UDPBufferPool: &sync.Pool{
 				New: func() any {
-					buf := make([]byte, common.UdpDataBufSize)
+					buf := make([]byte, common.UDPDataBufSize)
 					return &buf
 				},
 			},
 		},
 	}
 	if err := client.InitConfig(); err != nil {
-		return nil, fmt.Errorf("newClient: initConfig failed: %w", err)
+		return nil, fmt.Errorf("NewClient: initConfig failed: %w", err)
 	}
 	client.InitRateLimiter()
 	return client, nil
@@ -49,7 +49,7 @@ func NewClient(parsedURL *url.URL, logger *logs.Logger) (*Client, error) {
 func (c *Client) Run() {
 	logInfo := func(prefix string) {
 		c.Logger.Info("%v: client://%v@%v/%v?dns=%v&sni=%v&lbs=%v&min=%v&mode=%v&dial=%v&read=%v&rate=%v&slot=%v&proxy=%v&block=%v&notcp=%v&noudp=%v",
-			prefix, c.TunnelKey, c.TunnelTCPAddr, c.GetTargetAddrsString(), c.DnsCacheTTL, c.ServerName, c.LbStrategy, c.MinPoolCapacity,
+			prefix, c.TunnelKey, c.TunnelTCPAddr, c.GetTargetAddrsString(), c.DNSCacheTTL, c.ServerName, c.LBStrategy, c.MinPoolCapacity,
 			c.RunMode, c.DialerIP, c.ReadTimeout, c.RateLimit/125000, c.SlotLimit,
 			c.ProxyProtocol, c.BlockProtocol, c.DisableTCP, c.DisableUDP)
 	}
@@ -59,7 +59,7 @@ func (c *Client) Run() {
 
 	go func() {
 		for ctx.Err() == nil {
-			if err := c.start(); err != nil && err != io.EOF {
+			if err := c.Start(); err != nil && err != io.EOF {
 				c.Logger.Error("Client error: %v", err)
 				c.Stop()
 				select {
@@ -77,68 +77,68 @@ func (c *Client) Run() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), common.ShutdownTimeout)
 	defer cancel()
-	if err := c.Shutdown(shutdownCtx, c.Stop); err != nil {
+	if err := c.CommonShutdown(shutdownCtx, c.Stop); err != nil {
 		c.Logger.Error("Client shutdown error: %v", err)
 	} else {
 		c.Logger.Info("Client shutdown complete")
 	}
 }
 
-func (c *Client) start() error {
+func (c *Client) Start() error {
 	c.InitContext()
 
 	switch c.RunMode {
 	case "1":
 		if err := c.InitTunnelListener(); err == nil {
-			return c.singleStart()
+			return c.SingleStart()
 		} else {
-			return fmt.Errorf("start: initTunnelListener failed: %w", err)
+			return fmt.Errorf("Start: initTunnelListener failed: %w", err)
 		}
 	case "2":
-		return c.commonStart()
+		return c.CommonStart()
 	default:
 		if err := c.InitTunnelListener(); err == nil {
 			c.RunMode = "1"
-			return c.singleStart()
+			return c.SingleStart()
 		} else {
 			c.RunMode = "2"
-			return c.commonStart()
+			return c.CommonStart()
 		}
 	}
 }
 
-func (c *Client) singleStart() error {
+func (c *Client) SingleStart() error {
 	if err := c.SingleControl(); err != nil {
-		return fmt.Errorf("singleStart: singleControl failed: %w", err)
+		return fmt.Errorf("SingleStart: singleControl failed: %w", err)
 	}
 	return nil
 }
 
-func (c *Client) commonStart() error {
+func (c *Client) CommonStart() error {
 	c.Logger.Info("Pending tunnel handshake...")
 	c.HandshakeStart = time.Now()
-	if err := c.tunnelHandshake(); err != nil {
-		return fmt.Errorf("commonStart: tunnelHandshake failed: %w", err)
+	if err := c.TunnelHandshake(); err != nil {
+		return fmt.Errorf("CommonStart: tunnelHandshake failed: %w", err)
 	}
 
-	if err := c.initTunnelPool(); err != nil {
-		return fmt.Errorf("commonStart: initTunnelPool failed: %w", err)
+	if err := c.InitTunnelPool(); err != nil {
+		return fmt.Errorf("CommonStart: initTunnelPool failed: %w", err)
 	}
 
 	c.Logger.Info("Getting tunnel pool ready...")
 	if err := c.SetControlConn(); err != nil {
-		return fmt.Errorf("commonStart: setControlConn failed: %w", err)
+		return fmt.Errorf("CommonStart: setControlConn failed: %w", err)
 	}
 
 	if c.DataFlow == "+" {
 		if err := c.InitTargetListener(); err != nil {
-			return fmt.Errorf("commonStart: initTargetListener failed: %w", err)
+			return fmt.Errorf("CommonStart: initTargetListener failed: %w", err)
 		}
 		go c.TunnelLoop()
 	}
 
 	if err := c.CommonControl(); err != nil {
-		return fmt.Errorf("commonStart: commonControl failed: %w", err)
+		return fmt.Errorf("CommonStart: commonControl failed: %w", err)
 	}
 
 	return nil

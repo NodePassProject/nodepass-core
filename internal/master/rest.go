@@ -12,15 +12,15 @@ import (
 	"github.com/NodePassProject/nodepass/internal/common"
 )
 
-func (m *Master) handleInstances(w http.ResponseWriter, r *http.Request) {
+func (m *Master) HandleInstances(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		instances := []*Instance{}
-		m.instances.Range(func(_, value any) bool {
+		m.Instances.Range(func(_, value any) bool {
 			instances = append(instances, value.(*Instance))
 			return true
 		})
-		writeJSON(w, http.StatusOK, instances)
+		WriteJSON(w, http.StatusOK, instances)
 
 	case http.MethodPost:
 		var reqData struct {
@@ -28,25 +28,25 @@ func (m *Master) handleInstances(w http.ResponseWriter, r *http.Request) {
 			URL   string `json:"url"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil || reqData.URL == "" {
-			httpError(w, "Invalid request body", http.StatusBadRequest)
+			HTTPError(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
 		parsedURL, err := url.Parse(reqData.URL)
 		if err != nil {
-			httpError(w, "Invalid URL format", http.StatusBadRequest)
+			HTTPError(w, "Invalid URL format", http.StatusBadRequest)
 			return
 		}
 
 		instanceRole := parsedURL.Scheme
 		if instanceRole != "client" && instanceRole != "server" {
-			httpError(w, "Invalid URL scheme", http.StatusBadRequest)
+			HTTPError(w, "Invalid URL scheme", http.StatusBadRequest)
 			return
 		}
 
-		id := generateID()
-		if _, exists := m.instances.Load(id); exists {
-			httpError(w, "Instance ID already exists", http.StatusConflict)
+		id := GenerateID()
+		if _, exists := m.Instances.Load(id); exists {
+			HTTPError(w, "Instance ID already exists", http.StatusConflict)
 			return
 		}
 
@@ -54,63 +54,63 @@ func (m *Master) handleInstances(w http.ResponseWriter, r *http.Request) {
 			ID:      id,
 			Alias:   reqData.Alias,
 			Type:    instanceRole,
-			URL:     m.enhanceURL(reqData.URL, instanceRole),
+			URL:     m.EnhanceURL(reqData.URL, instanceRole),
 			Status:  "stopped",
 			Restart: true,
 			Meta:    Meta{Tags: make(map[string]string)},
 			stopped: make(chan struct{}),
 		}
 
-		instance.Config = m.generateConfigURL(instance)
-		m.instances.Store(id, instance)
+		instance.Config = m.GenerateConfigURL(instance)
+		m.Instances.Store(id, instance)
 
-		go m.startInstance(instance)
+		go m.StartInstance(instance)
 
 		go func() {
-			time.Sleep(baseDuration)
-			m.saveState()
+			time.Sleep(BaseDuration)
+			m.SaveState()
 		}()
-		writeJSON(w, http.StatusCreated, instance)
+		WriteJSON(w, http.StatusCreated, instance)
 
-		m.sendSSEEvent("create", instance)
+		m.SendSSEEvent("create", instance)
 
 	default:
-		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		HTTPError(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (m *Master) handleInstanceDetail(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, fmt.Sprintf("%s/instances/", m.prefix))
+func (m *Master) HandleInstanceDetail(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, fmt.Sprintf("%s/instances/", m.Prefix))
 	if id == "" || id == "/" {
-		httpError(w, "Instance ID is required", http.StatusBadRequest)
+		HTTPError(w, "Instance ID is required", http.StatusBadRequest)
 		return
 	}
 
-	instance, ok := m.findInstance(id)
+	instance, ok := m.FindInstance(id)
 	if !ok {
-		httpError(w, "Instance not found", http.StatusNotFound)
+		HTTPError(w, "Instance not found", http.StatusNotFound)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		m.handleGetInstance(w, instance)
+		m.HandleGetInstance(w, instance)
 	case http.MethodPatch:
-		m.handlePatchInstance(w, r, id, instance)
+		m.HandlePatchInstance(w, r, id, instance)
 	case http.MethodPut:
-		m.handlePutInstance(w, r, id, instance)
+		m.HandlePutInstance(w, r, id, instance)
 	case http.MethodDelete:
-		m.handleDeleteInstance(w, id, instance)
+		m.HandleDeleteInstance(w, id, instance)
 	default:
-		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		HTTPError(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (m *Master) handleGetInstance(w http.ResponseWriter, instance *Instance) {
-	writeJSON(w, http.StatusOK, instance)
+func (m *Master) HandleGetInstance(w http.ResponseWriter, instance *Instance) {
+	WriteJSON(w, http.StatusOK, instance)
 }
 
-func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id string, instance *Instance) {
+func (m *Master) HandlePatchInstance(w http.ResponseWriter, r *http.Request, id string, instance *Instance) {
 	var reqData struct {
 		Alias   string `json:"alias,omitempty"`
 		Action  string `json:"action,omitempty"`
@@ -121,23 +121,23 @@ func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 		} `json:"meta,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&reqData); err == nil {
-		if id == apiKeyID {
+		if id == APIKeyID {
 			if reqData.Action == "restart" {
-				m.regenerateAPIKey(instance)
-				m.sendSSEEvent("update", instance)
+				m.ReGenerateAPIKey(instance)
+				m.SendSSEEvent("update", instance)
 			}
 		} else {
 			if reqData.Alias != "" && instance.Alias != reqData.Alias {
-				if len(reqData.Alias) > maxValueLen {
-					httpError(w, fmt.Sprintf("Instance alias exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+				if len(reqData.Alias) > MaxValueLen {
+					HTTPError(w, fmt.Sprintf("Instance alias exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 					return
 				}
 				instance.Alias = reqData.Alias
-				m.instances.Store(id, instance)
-				go m.saveState()
+				m.Instances.Store(id, instance)
+				go m.SaveState()
 				m.Logger.Info("Alias updated: %v [%v]", reqData.Alias, instance.ID)
 
-				m.sendSSEEvent("update", instance)
+				m.SendSSEEvent("update", instance)
 			}
 
 			if reqData.Action != "" {
@@ -148,7 +148,7 @@ func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 					"reset":   true,
 				}
 				if !validActions[reqData.Action] {
-					httpError(w, fmt.Sprintf("Invalid action: %s", reqData.Action), http.StatusBadRequest)
+					HTTPError(w, fmt.Sprintf("Invalid action: %s", reqData.Action), http.StatusBadRequest)
 					return
 				}
 
@@ -165,37 +165,37 @@ func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 					instance.tcpTXBase = 0
 					instance.udpRXBase = 0
 					instance.udpTXBase = 0
-					m.instances.Store(id, instance)
-					go m.saveState()
+					m.Instances.Store(id, instance)
+					go m.SaveState()
 					m.Logger.Info("Traffic stats reset: 0 [%v]", instance.ID)
 
-					m.sendSSEEvent("update", instance)
+					m.SendSSEEvent("update", instance)
 				} else {
-					m.processInstanceAction(instance, reqData.Action)
+					m.ProcessInstanceAction(instance, reqData.Action)
 				}
 			}
 
 			if reqData.Restart != nil && instance.Restart != *reqData.Restart {
 				instance.Restart = *reqData.Restart
-				m.instances.Store(id, instance)
-				go m.saveState()
+				m.Instances.Store(id, instance)
+				go m.SaveState()
 				m.Logger.Info("Restart policy updated: %v [%v]", *reqData.Restart, instance.ID)
 
-				m.sendSSEEvent("update", instance)
+				m.SendSSEEvent("update", instance)
 			}
 
 			if reqData.Meta != nil {
 				if reqData.Meta.Peer != nil {
-					if len(reqData.Meta.Peer.SID) > maxValueLen {
-						httpError(w, fmt.Sprintf("Meta peer.sid exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+					if len(reqData.Meta.Peer.SID) > MaxValueLen {
+						HTTPError(w, fmt.Sprintf("Meta peer.sid exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 						return
 					}
-					if len(reqData.Meta.Peer.Type) > maxValueLen {
-						httpError(w, fmt.Sprintf("Meta peer.type exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+					if len(reqData.Meta.Peer.Type) > MaxValueLen {
+						HTTPError(w, fmt.Sprintf("Meta peer.type exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 						return
 					}
-					if len(reqData.Meta.Peer.Alias) > maxValueLen {
-						httpError(w, fmt.Sprintf("Meta peer.alias exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+					if len(reqData.Meta.Peer.Alias) > MaxValueLen {
+						HTTPError(w, fmt.Sprintf("Meta peer.alias exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 						return
 					}
 					instance.Meta.Peer = *reqData.Meta.Peer
@@ -204,16 +204,16 @@ func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 				if reqData.Meta.Tags != nil {
 					seen := make(map[string]bool)
 					for key, value := range reqData.Meta.Tags {
-						if len(key) > maxValueLen {
-							httpError(w, fmt.Sprintf("Meta tag key exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+						if len(key) > MaxValueLen {
+							HTTPError(w, fmt.Sprintf("Meta tag key exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 							return
 						}
-						if len(value) > maxValueLen {
-							httpError(w, fmt.Sprintf("Meta tag value exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+						if len(value) > MaxValueLen {
+							HTTPError(w, fmt.Sprintf("Meta tag value exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 							return
 						}
 						if seen[key] {
-							httpError(w, fmt.Sprintf("Duplicate meta tag key: %s", key), http.StatusBadRequest)
+							HTTPError(w, fmt.Sprintf("Duplicate meta tag key: %s", key), http.StatusBadRequest)
 							return
 						}
 						seen[key] = true
@@ -221,20 +221,20 @@ func (m *Master) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 					instance.Meta.Tags = reqData.Meta.Tags
 				}
 
-				m.instances.Store(id, instance)
-				go m.saveState()
+				m.Instances.Store(id, instance)
+				go m.SaveState()
 				m.Logger.Info("Meta updated [%v]", instance.ID)
-				m.sendSSEEvent("update", instance)
+				m.SendSSEEvent("update", instance)
 			}
 
 		}
 	}
-	writeJSON(w, http.StatusOK, instance)
+	WriteJSON(w, http.StatusOK, instance)
 }
 
-func (m *Master) handlePutInstance(w http.ResponseWriter, r *http.Request, id string, instance *Instance) {
-	if id == apiKeyID {
-		httpError(w, "Forbidden: API Key", http.StatusForbidden)
+func (m *Master) HandlePutInstance(w http.ResponseWriter, r *http.Request, id string, instance *Instance) {
+	if id == APIKeyID {
+		HTTPError(w, "Forbidden: API Key", http.StatusForbidden)
 		return
 	}
 
@@ -242,120 +242,120 @@ func (m *Master) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 		URL string `json:"url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil || reqData.URL == "" {
-		httpError(w, "Invalid request body", http.StatusBadRequest)
+		HTTPError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	parsedURL, err := url.Parse(reqData.URL)
 	if err != nil {
-		httpError(w, "Invalid URL format", http.StatusBadRequest)
+		HTTPError(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
 
 	instanceRole := parsedURL.Scheme
 	if instanceRole != "client" && instanceRole != "server" {
-		httpError(w, "Invalid URL scheme", http.StatusBadRequest)
+		HTTPError(w, "Invalid URL scheme", http.StatusBadRequest)
 		return
 	}
 
-	enhancedURL := m.enhanceURL(reqData.URL, instanceRole)
+	enhancedURL := m.EnhanceURL(reqData.URL, instanceRole)
 
 	if instance.URL == enhancedURL {
-		httpError(w, "Instance URL conflict", http.StatusConflict)
+		HTTPError(w, "Instance URL conflict", http.StatusConflict)
 		return
 	}
 
 	if instance.Status != "stopped" {
-		m.stopInstance(instance)
-		time.Sleep(baseDuration)
+		m.StopInstance(instance)
+		time.Sleep(BaseDuration)
 	}
 
 	instance.URL = enhancedURL
 	instance.Type = instanceRole
-	instance.Config = m.generateConfigURL(instance)
+	instance.Config = m.GenerateConfigURL(instance)
 
 	instance.Status = "stopped"
-	m.instances.Store(id, instance)
+	m.Instances.Store(id, instance)
 
-	go m.startInstance(instance)
+	go m.StartInstance(instance)
 
 	go func() {
-		time.Sleep(baseDuration)
-		m.saveState()
+		time.Sleep(BaseDuration)
+		m.SaveState()
 	}()
-	writeJSON(w, http.StatusOK, instance)
+	WriteJSON(w, http.StatusOK, instance)
 
 	m.Logger.Info("Instance URL updated: %v [%v]", instance.URL, instance.ID)
 }
 
-func (m *Master) handleDeleteInstance(w http.ResponseWriter, id string, instance *Instance) {
-	if id == apiKeyID {
-		httpError(w, "Forbidden: API Key", http.StatusForbidden)
+func (m *Master) HandleDeleteInstance(w http.ResponseWriter, id string, instance *Instance) {
+	if id == APIKeyID {
+		HTTPError(w, "Forbidden: API Key", http.StatusForbidden)
 		return
 	}
 
 	instance.deleted = true
-	m.instances.Store(id, instance)
+	m.Instances.Store(id, instance)
 
 	if instance.Status != "stopped" {
-		m.stopInstance(instance)
+		m.StopInstance(instance)
 	}
-	m.instances.Delete(id)
-	go m.saveState()
+	m.Instances.Delete(id)
+	go m.SaveState()
 	w.WriteHeader(http.StatusNoContent)
-	m.sendSSEEvent("delete", instance)
+	m.SendSSEEvent("delete", instance)
 }
 
-func (m *Master) handleInfo(w http.ResponseWriter, r *http.Request) {
+func (m *Master) HandleInfo(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, m.getMasterInfo())
+		WriteJSON(w, http.StatusOK, m.GetMasterInfo())
 
 	case http.MethodPost:
 		var reqData struct {
 			Alias string `json:"alias"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
-			httpError(w, "Invalid request body", http.StatusBadRequest)
+			HTTPError(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
-		if len(reqData.Alias) > maxValueLen {
-			httpError(w, fmt.Sprintf("Master alias exceeds maximum length %d", maxValueLen), http.StatusBadRequest)
+		if len(reqData.Alias) > MaxValueLen {
+			HTTPError(w, fmt.Sprintf("Master alias exceeds maximum length %d", MaxValueLen), http.StatusBadRequest)
 			return
 		}
-		m.alias = reqData.Alias
+		m.Alias = reqData.Alias
 
-		if apiKey, ok := m.findInstance(apiKeyID); ok {
-			apiKey.Alias = m.alias
-			m.instances.Store(apiKeyID, apiKey)
-			go m.saveState()
+		if apiKey, ok := m.FindInstance(APIKeyID); ok {
+			apiKey.Alias = m.Alias
+			m.Instances.Store(APIKeyID, apiKey)
+			go m.SaveState()
 		}
 
-		writeJSON(w, http.StatusOK, m.getMasterInfo())
+		WriteJSON(w, http.StatusOK, m.GetMasterInfo())
 
 	default:
-		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		HTTPError(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (m *Master) handleTCPing(w http.ResponseWriter, r *http.Request) {
+func (m *Master) HandleTCPing(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		HTTPError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	target := r.URL.Query().Get("target")
 	if target == "" {
-		httpError(w, "Target address required", http.StatusBadRequest)
+		HTTPError(w, "Target address required", http.StatusBadRequest)
 		return
 	}
 
-	result := m.performTCPing(target)
-	writeJSON(w, http.StatusOK, result)
+	result := m.PerformTCPing(target)
+	WriteJSON(w, http.StatusOK, result)
 }
 
-func (m *Master) performTCPing(target string) *TCPingResult {
+func (m *Master) PerformTCPing(target string) *TCPingResult {
 	result := &TCPingResult{
 		Target:    target,
 		Connected: false,
@@ -364,8 +364,8 @@ func (m *Master) performTCPing(target string) *TCPingResult {
 	}
 
 	select {
-	case m.tcpingSem <- struct{}{}:
-		defer func() { <-m.tcpingSem }()
+	case m.TCPingSem <- struct{}{}:
+		defer func() { <-m.TCPingSem }()
 	case <-time.After(time.Second):
 		errMsg := "too many requests"
 		result.Error = &errMsg
@@ -386,14 +386,14 @@ func (m *Master) performTCPing(target string) *TCPingResult {
 	return result
 }
 
-func (m *Master) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	setCorsHeaders(w)
+func (m *Master) HandleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	SetCorsHeaders(w)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(m.generateOpenAPISpec()))
+	w.Write([]byte(m.GenerateOpenAPISpec()))
 }
 
-func (m *Master) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	setCorsHeaders(w)
+func (m *Master) HandleSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	SetCorsHeaders(w)
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, swaggerUIHTML, m.generateOpenAPISpec())
+	fmt.Fprintf(w, SwaggerUIHTML, m.GenerateOpenAPISpec())
 }

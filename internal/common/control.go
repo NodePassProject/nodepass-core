@@ -16,18 +16,18 @@ func (c *Common) SetControlConn() error {
 			break
 		}
 		if time.Since(start) > HandshakeTimeout {
-			return fmt.Errorf("setControlConn: handshake timeout")
+			return fmt.Errorf("SetControlConn: handshake timeout")
 		}
 		select {
 		case <-c.Ctx.Done():
-			return fmt.Errorf("setControlConn: context error: %w", c.Ctx.Err())
+			return fmt.Errorf("SetControlConn: context error: %w", c.Ctx.Err())
 		case <-time.After(ContextCheckInterval):
 		}
 	}
 
 	poolConn, err := c.TunnelPool.OutgoingGet("00000000", PoolGetTimeout)
 	if err != nil {
-		return fmt.Errorf("setControlConn: outgoingGet failed: %w", err)
+		return fmt.Errorf("SetControlConn: outgoingGet failed: %w", err)
 	}
 	c.ControlConn = poolConn
 	c.BufReader = bufio.NewReader(&conn.TimeoutReader{Conn: c.ControlConn, Timeout: 3 * ReportInterval})
@@ -41,13 +41,13 @@ func (c *Common) SetControlConn() error {
 			case data := <-c.WriteChan:
 				_, err := c.ControlConn.Write(data)
 				if err != nil {
-					c.Logger.Error("startWriter: write failed: %v", err)
+					c.Logger.Error("SetControlConn: write failed: %v", err)
 				}
 			}
 		}
 	}()
 
-	if c.TlsCode == "1" {
+	if c.TLSCode == "1" {
 		c.Logger.Info("TLS code-1: RAM cert fingerprint verifying...")
 	}
 	return nil
@@ -72,15 +72,15 @@ func (c *Common) CommonQueue() error {
 	for c.Ctx.Err() == nil {
 		rawSignal, err := c.BufReader.ReadBytes('\n')
 		if err != nil {
-			return fmt.Errorf("commonQueue: readBytes failed: %w", err)
+			return fmt.Errorf("CommonQueue: readBytes failed: %w", err)
 		}
 
 		signalData, err := c.Decode(rawSignal)
 		if err != nil {
-			c.Logger.Error("commonQueue: decode signal failed: %v", err)
+			c.Logger.Error("CommonQueue: decode signal failed: %v", err)
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("commonQueue: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("CommonQueue: context error: %w", c.Ctx.Err())
 			case <-time.After(ContextCheckInterval):
 			}
 			continue
@@ -88,10 +88,10 @@ func (c *Common) CommonQueue() error {
 
 		var signal Signal
 		if err := json.Unmarshal(signalData, &signal); err != nil {
-			c.Logger.Error("commonQueue: unmarshal signal failed: %v", err)
+			c.Logger.Error("CommonQueue: unmarshal signal failed: %v", err)
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("commonQueue: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("CommonQueue: context error: %w", c.Ctx.Err())
 			case <-time.After(ContextCheckInterval):
 			}
 			continue
@@ -100,23 +100,23 @@ func (c *Common) CommonQueue() error {
 		select {
 		case c.SignalChan <- signal:
 		default:
-			c.Logger.Error("commonQueue: queue limit reached: %v", SemaphoreLimit)
+			c.Logger.Error("CommonQueue: queue limit reached: %v", SemaphoreLimit)
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("commonQueue: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("CommonQueue: context error: %w", c.Ctx.Err())
 			case <-time.After(ContextCheckInterval):
 			}
 		}
 	}
 
-	return fmt.Errorf("commonQueue: context error: %w", c.Ctx.Err())
+	return fmt.Errorf("CommonQueue: context error: %w", c.Ctx.Err())
 }
 
 func (c *Common) HealthCheck() error {
 	ticker := time.NewTicker(ReportInterval)
 	defer ticker.Stop()
 
-	if c.TlsCode == "1" {
+	if c.TLSCode == "1" {
 		go func() {
 			select {
 			case <-c.Ctx.Done():
@@ -137,14 +137,14 @@ func (c *Common) HealthCheck() error {
 
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("healthCheck: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("HealthCheck: context error: %w", c.Ctx.Err())
 			case <-ticker.C:
 			}
 
 			c.Logger.Debug("Tunnel pool flushed: %v active connections", c.TunnelPool.Active())
 		}
 
-		if c.LbStrategy == "1" && len(c.TargetTCPAddrs) > 1 {
+		if c.LBStrategy == "1" && len(c.TargetTCPAddrs) > 1 {
 			c.ProbeBestTarget()
 		}
 
@@ -155,19 +155,19 @@ func (c *Common) HealthCheck() error {
 		}
 		select {
 		case <-c.Ctx.Done():
-			return fmt.Errorf("healthCheck: context error: %w", c.Ctx.Err())
+			return fmt.Errorf("HealthCheck: context error: %w", c.Ctx.Err())
 		case <-ticker.C:
 		}
 	}
 
-	return fmt.Errorf("healthCheck: context error: %w", c.Ctx.Err())
+	return fmt.Errorf("HealthCheck: context error: %w", c.Ctx.Err())
 }
 
 func (c *Common) SingleControl() error {
 	errChan := make(chan error, 3)
 
 	if len(c.TargetTCPAddrs) > 0 {
-		go func() { errChan <- c.singleEventLoop() }()
+		go func() { errChan <- c.SingleEventLoop() }()
 	}
 	if c.TunnelListener != nil || c.DisableTCP != "1" {
 		go func() { errChan <- c.SingleTCPLoop() }()
@@ -178,8 +178,8 @@ func (c *Common) SingleControl() error {
 
 	select {
 	case <-c.Ctx.Done():
-		return fmt.Errorf("singleControl: context error: %w", c.Ctx.Err())
+		return fmt.Errorf("SingleControl: context error: %w", c.Ctx.Err())
 	case err := <-errChan:
-		return fmt.Errorf("singleControl: %w", err)
+		return fmt.Errorf("SingleControl: %w", err)
 	}
 }

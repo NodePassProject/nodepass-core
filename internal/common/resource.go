@@ -3,24 +3,24 @@ package common
 import "sync/atomic"
 
 func (c *Common) GetTCPBuffer() []byte {
-	buf := c.TcpBufferPool.Get().(*[]byte)
-	return (*buf)[:TcpDataBufSize]
+	buf := c.TCPBufferPool.Get().(*[]byte)
+	return (*buf)[:TCPDataBufSize]
 }
 
 func (c *Common) PutTCPBuffer(buf []byte) {
-	if buf != nil && cap(buf) >= TcpDataBufSize {
-		c.TcpBufferPool.Put(&buf)
+	if buf != nil && cap(buf) >= TCPDataBufSize {
+		c.TCPBufferPool.Put(&buf)
 	}
 }
 
 func (c *Common) GetUDPBuffer() []byte {
-	buf := c.UdpBufferPool.Get().(*[]byte)
-	return (*buf)[:UdpDataBufSize]
+	buf := c.UDPBufferPool.Get().(*[]byte)
+	return (*buf)[:UDPDataBufSize]
 }
 
 func (c *Common) PutUDPBuffer(buf []byte) {
-	if buf != nil && cap(buf) >= UdpDataBufSize {
-		c.UdpBufferPool.Put(&buf)
+	if buf != nil && cap(buf) >= UDPDataBufSize {
+		c.UDPBufferPool.Put(&buf)
 	}
 }
 
@@ -29,15 +29,15 @@ func (c *Common) TryAcquireSlot(isUDP bool) bool {
 		return true
 	}
 
-	currentTotal := atomic.LoadInt32(&c.TcpSlot) + atomic.LoadInt32(&c.UdpSlot)
+	currentTotal := atomic.LoadInt32(&c.TCPSlot) + atomic.LoadInt32(&c.UDPSlot)
 	if currentTotal >= c.SlotLimit {
 		return false
 	}
 
 	if isUDP {
-		atomic.AddInt32(&c.UdpSlot, 1)
+		atomic.AddInt32(&c.UDPSlot, 1)
 	} else {
-		atomic.AddInt32(&c.TcpSlot, 1)
+		atomic.AddInt32(&c.TCPSlot, 1)
 	}
 	return true
 }
@@ -48,26 +48,26 @@ func (c *Common) ReleaseSlot(isUDP bool) {
 	}
 
 	if isUDP {
-		if current := atomic.LoadInt32(&c.UdpSlot); current > 0 {
-			atomic.AddInt32(&c.UdpSlot, -1)
+		if current := atomic.LoadInt32(&c.UDPSlot); current > 0 {
+			atomic.AddInt32(&c.UDPSlot, -1)
 		}
 	} else {
-		if current := atomic.LoadInt32(&c.TcpSlot); current > 0 {
-			atomic.AddInt32(&c.TcpSlot, -1)
+		if current := atomic.LoadInt32(&c.TCPSlot); current > 0 {
+			atomic.AddInt32(&c.TCPSlot, -1)
 		}
 	}
 }
 
-func (c *Common) GetTcpRX() *uint64  { return &c.TcpRX }
-func (c *Common) GetTcpTX() *uint64  { return &c.TcpTX }
-func (c *Common) GetUdpRX() *uint64  { return &c.UdpRX }
-func (c *Common) GetUdpTX() *uint64  { return &c.UdpTX }
-func (c *Common) GetTcpSlot() *int32 { return &c.TcpSlot }
-func (c *Common) GetUdpSlot() *int32 { return &c.UdpSlot }
+func (c *Common) GetTCPRX() *uint64  { return &c.TCPRX }
+func (c *Common) GetTCPTX() *uint64  { return &c.TCPTX }
+func (c *Common) GetUDPRX() *uint64  { return &c.UDPRX }
+func (c *Common) GetUDPTX() *uint64  { return &c.UDPTX }
+func (c *Common) GetTCPSlot() *int32 { return &c.TCPSlot }
+func (c *Common) GetUDPSlot() *int32 { return &c.UDPSlot }
 
-func (c *Common) LoadTcpSlot() int32 { return atomic.LoadInt32(&c.TcpSlot) }
-func (c *Common) LoadUdpSlot() int32 { return atomic.LoadInt32(&c.UdpSlot) }
-func (c *Common) LoadTcpRX() uint64  { return atomic.LoadUint64(&c.TcpRX) }
-func (c *Common) LoadTcpTX() uint64  { return atomic.LoadUint64(&c.TcpTX) }
-func (c *Common) LoadUdpRX() uint64  { return atomic.LoadUint64(&c.UdpRX) }
-func (c *Common) LoadUdpTX() uint64  { return atomic.LoadUint64(&c.UdpTX) }
+func (c *Common) LoadTCPSlot() int32 { return atomic.LoadInt32(&c.TCPSlot) }
+func (c *Common) LoadUDPSlot() int32 { return atomic.LoadInt32(&c.UDPSlot) }
+func (c *Common) LoadTCPRX() uint64  { return atomic.LoadUint64(&c.TCPRX) }
+func (c *Common) LoadTCPTX() uint64  { return atomic.LoadUint64(&c.TCPTX) }
+func (c *Common) LoadUDPRX() uint64  { return atomic.LoadUint64(&c.UDPRX) }
+func (c *Common) LoadUDPTX() uint64  { return atomic.LoadUint64(&c.UDPTX) }

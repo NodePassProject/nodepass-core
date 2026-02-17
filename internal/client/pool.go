@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/NodePassProject/nodepass/internal/common"
 	"github.com/NodePassProject/nph2"
 	"github.com/NodePassProject/npws"
 	"github.com/NodePassProject/pool"
 	"github.com/NodePassProject/quic"
-	"github.com/NodePassProject/nodepass/internal/common"
 )
 
-func (c *Client) initTunnelPool() error {
+func (c *Client) InitTunnelPool() error {
 	switch c.PoolType {
 	case "0":
 		tcpPool := pool.NewClientPool(
@@ -20,14 +20,14 @@ func (c *Client) initTunnelPool() error {
 			common.MinPoolInterval,
 			common.MaxPoolInterval,
 			common.ReportInterval,
-			c.TlsCode,
+			c.TLSCode,
 			c.ServerName,
 			func() (net.Conn, error) {
 				tcpAddr, err := c.GetTunnelTCPAddr()
 				if err != nil {
 					return nil, err
 				}
-				return net.DialTimeout("tcp", tcpAddr.String(), common.TcpDialTimeout)
+				return net.DialTimeout("tcp", tcpAddr.String(), common.TCPDialTimeout)
 			})
 		go tcpPool.ClientManager()
 		c.TunnelPool = tcpPool
@@ -38,7 +38,7 @@ func (c *Client) initTunnelPool() error {
 			common.MinPoolInterval,
 			common.MaxPoolInterval,
 			common.ReportInterval,
-			c.TlsCode,
+			c.TLSCode,
 			c.ServerName,
 			func() (string, error) {
 				udpAddr, err := c.GetTunnelUDPAddr()
@@ -56,7 +56,7 @@ func (c *Client) initTunnelPool() error {
 			common.MinPoolInterval,
 			common.MaxPoolInterval,
 			common.ReportInterval,
-			c.TlsCode,
+			c.TLSCode,
 			c.TunnelAddr)
 		go websocketPool.ClientManager()
 		c.TunnelPool = websocketPool
@@ -67,7 +67,7 @@ func (c *Client) initTunnelPool() error {
 			common.MinPoolInterval,
 			common.MaxPoolInterval,
 			common.ReportInterval,
-			c.TlsCode,
+			c.TLSCode,
 			c.ServerName,
 			func() (string, error) {
 				tcpAddr, err := c.GetTunnelTCPAddr()
@@ -79,7 +79,7 @@ func (c *Client) initTunnelPool() error {
 		go http2Pool.ClientManager()
 		c.TunnelPool = http2Pool
 	default:
-		return fmt.Errorf("initTunnelPool: unknown pool type: %s", c.PoolType)
+		return fmt.Errorf("InitTunnelPool: unknown pool type: %s", c.PoolType)
 	}
 	return nil
 }

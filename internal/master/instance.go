@@ -15,16 +15,16 @@ import (
 	"github.com/NodePassProject/nodepass/internal/common"
 )
 
-func (m *Master) findInstance(id string) (*Instance, bool) {
-	value, exists := m.instances.Load(id)
+func (m *Master) FindInstance(id string) (*Instance, bool) {
+	value, exists := m.Instances.Load(id)
 	if !exists {
 		return nil, false
 	}
 	return value.(*Instance), true
 }
 
-func (m *Master) startInstance(instance *Instance) {
-	if value, exists := m.instances.Load(instance.ID); exists {
+func (m *Master) StartInstance(instance *Instance) {
+	if value, exists := m.Instances.Load(instance.ID); exists {
 		instance = value.(*Instance)
 		if instance.Status != "stopped" {
 			return
@@ -38,10 +38,10 @@ func (m *Master) startInstance(instance *Instance) {
 
 	execPath, err := os.Executable()
 	if err != nil {
-		m.Logger.Error("startInstance: get path failed: %v [%v]", err, instance.ID)
+		m.Logger.Error("StartInstance: get path failed: %v [%v]", err, instance.ID)
 		instance.Status = "error"
-		m.instances.Store(instance.ID, instance)
-		m.sendSSEEvent("update", instance)
+		m.Instances.Store(instance.ID, instance)
+		m.SendSSEEvent("update", instance)
 		return
 	}
 
@@ -56,27 +56,27 @@ func (m *Master) startInstance(instance *Instance) {
 
 	if err := cmd.Start(); err != nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
 		if err != nil {
-			m.Logger.Error("startInstance: instance error: %v [%v]", err, instance.ID)
+			m.Logger.Error("StartInstance: instance error: %v [%v]", err, instance.ID)
 		} else {
-			m.Logger.Error("startInstance: instance start failed [%v]", instance.ID)
+			m.Logger.Error("StartInstance: instance start failed [%v]", instance.ID)
 		}
 		instance.Status = "error"
-		m.instances.Store(instance.ID, instance)
-		m.sendSSEEvent("update", instance)
+		m.Instances.Store(instance.ID, instance)
+		m.SendSSEEvent("update", instance)
 		cancel()
 		return
 	}
 
 	instance.cmd = cmd
 	instance.Status = "running"
-	go m.monitorInstance(instance, cmd)
+	go m.MonitorInstance(instance, cmd)
 
-	m.instances.Store(instance.ID, instance)
+	m.Instances.Store(instance.ID, instance)
 
-	m.sendSSEEvent("update", instance)
+	m.SendSSEEvent("update", instance)
 }
 
-func (m *Master) monitorInstance(instance *Instance, cmd *exec.Cmd) {
+func (m *Master) MonitorInstance(instance *Instance, cmd *exec.Cmd) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
@@ -85,39 +85,39 @@ func (m *Master) monitorInstance(instance *Instance, cmd *exec.Cmd) {
 		case <-instance.stopped:
 			return
 		case err := <-done:
-			if value, exists := m.instances.Load(instance.ID); exists {
+			if value, exists := m.Instances.Load(instance.ID); exists {
 				instance = value.(*Instance)
 				if instance.Status == "running" {
 					if err != nil {
-						m.Logger.Error("monitorInstance: instance error: %v [%v]", err, instance.ID)
+						m.Logger.Error("MonitorInstance: instance error: %v [%v]", err, instance.ID)
 						instance.Status = "error"
 					} else {
 						instance.Status = "stopped"
 					}
-					m.instances.Store(instance.ID, instance)
-					m.sendSSEEvent("update", instance)
+					m.Instances.Store(instance.ID, instance)
+					m.SendSSEEvent("update", instance)
 				}
 			}
 			return
 		case <-time.After(common.ReportInterval):
 			if !instance.lastCheckPoint.IsZero() && time.Since(instance.lastCheckPoint) > 3*common.ReportInterval {
 				instance.Status = "error"
-				m.instances.Store(instance.ID, instance)
-				m.sendSSEEvent("update", instance)
+				m.Instances.Store(instance.ID, instance)
+				m.SendSSEEvent("update", instance)
 			}
 		}
 	}
 }
 
-func (m *Master) stopInstance(instance *Instance) {
+func (m *Master) StopInstance(instance *Instance) {
 	if instance.Status == "stopped" {
 		return
 	}
 
 	if instance.cmd == nil || instance.cmd.Process == nil {
 		instance.Status = "stopped"
-		m.instances.Store(instance.ID, instance)
-		m.sendSSEEvent("update", instance)
+		m.Instances.Store(instance.ID, instance)
+		m.SendSSEEvent("update", instance)
 		return
 	}
 
@@ -147,7 +147,7 @@ func (m *Master) stopInstance(instance *Instance) {
 	select {
 	case <-done:
 		m.Logger.Info("Instance stopped [%v]", instance.ID)
-	case <-time.After(gracefulTimeout):
+	case <-time.After(GracefulTimeout):
 		process.Kill()
 		<-done
 		m.Logger.Warn("Instance force killed [%v]", instance.ID)
@@ -160,64 +160,64 @@ func (m *Master) stopInstance(instance *Instance) {
 	instance.Pool = 0
 	instance.TCPS = 0
 	instance.UDPS = 0
-	m.instances.Store(instance.ID, instance)
+	m.Instances.Store(instance.ID, instance)
 
-	go m.saveState()
+	go m.SaveState()
 
-	m.sendSSEEvent("update", instance)
+	m.SendSSEEvent("update", instance)
 }
 
-func (m *Master) processInstanceAction(instance *Instance, action string) {
+func (m *Master) ProcessInstanceAction(instance *Instance, action string) {
 	switch action {
 	case "start":
 		if instance.Status == "stopped" {
-			go m.startInstance(instance)
+			go m.StartInstance(instance)
 		}
 	case "stop":
 		if instance.Status != "stopped" {
-			go m.stopInstance(instance)
+			go m.StopInstance(instance)
 		}
 	case "restart":
 		go func() {
-			m.stopInstance(instance)
-			time.Sleep(baseDuration)
-			m.startInstance(instance)
+			m.StopInstance(instance)
+			time.Sleep(BaseDuration)
+			m.StartInstance(instance)
 		}()
 	}
 }
 
-func (m *Master) regenerateAPIKey(instance *Instance) {
-	instance.URL = generateAPIKey()
-	m.instances.Store(apiKeyID, instance)
+func (m *Master) ReGenerateAPIKey(instance *Instance) {
+	instance.URL = GenerateAPIKey()
+	m.Instances.Store(APIKeyID, instance)
 	fmt.Printf("%s  \033[32mINFO\033[0m  API Key regenerated: %v\n", time.Now().Format("2006-01-02 15:04:05.000"), instance.URL)
-	go m.saveState()
-	go m.shutdownSSEConnections()
+	go m.SaveState()
+	go m.ShutdownSSEConnections()
 }
 
-func (m *Master) enhanceURL(instanceURL string, instanceRole string) string {
+func (m *Master) EnhanceURL(instanceURL string, instanceRole string) string {
 	parsedURL, err := url.Parse(instanceURL)
 	if err != nil {
-		m.Logger.Error("enhanceURL: invalid URL format: %v", err)
+		m.Logger.Error("EnhanceURL: invalid URL format: %v", err)
 		return instanceURL
 	}
 
 	query := parsedURL.Query()
 
-	if m.logLevel != "" && query.Get("log") == "" {
-		query.Set("log", m.logLevel)
+	if m.LogLevel != "" && query.Get("log") == "" {
+		query.Set("log", m.LogLevel)
 	}
 
-	if instanceRole == "server" && m.TlsCode != "0" {
+	if instanceRole == "server" && m.TLSCode != "0" {
 		if query.Get("tls") == "" {
-			query.Set("tls", m.TlsCode)
+			query.Set("tls", m.TLSCode)
 		}
 
-		if m.TlsCode == "2" {
-			if m.crtPath != "" && query.Get("crt") == "" {
-				query.Set("crt", m.crtPath)
+		if m.TLSCode == "2" {
+			if m.CrtPath != "" && query.Get("crt") == "" {
+				query.Set("crt", m.CrtPath)
 			}
-			if m.keyPath != "" && query.Get("key") == "" {
-				query.Set("key", m.keyPath)
+			if m.KeyPath != "" && query.Get("key") == "" {
+				query.Set("key", m.KeyPath)
 			}
 		}
 	}
@@ -226,30 +226,30 @@ func (m *Master) enhanceURL(instanceURL string, instanceRole string) string {
 	return parsedURL.String()
 }
 
-func (m *Master) generateConfigURL(instance *Instance) string {
+func (m *Master) GenerateConfigURL(instance *Instance) string {
 	parsedURL, err := url.Parse(instance.URL)
 	if err != nil {
-		m.Logger.Error("generateConfigURL: invalid URL format: %v", err)
+		m.Logger.Error("GenerateConfigURL: invalid URL format: %v", err)
 		return instance.URL
 	}
 
 	query := parsedURL.Query()
 
-	if m.logLevel != "" && query.Get("log") == "" {
-		query.Set("log", m.logLevel)
+	if m.LogLevel != "" && query.Get("log") == "" {
+		query.Set("log", m.LogLevel)
 	}
 
-	if instance.Type == "server" && m.TlsCode != "0" {
+	if instance.Type == "server" && m.TLSCode != "0" {
 		if query.Get("tls") == "" {
-			query.Set("tls", m.TlsCode)
+			query.Set("tls", m.TLSCode)
 		}
 
-		if m.TlsCode == "2" {
-			if m.crtPath != "" && query.Get("crt") == "" {
-				query.Set("crt", m.crtPath)
+		if m.TLSCode == "2" {
+			if m.CrtPath != "" && query.Get("crt") == "" {
+				query.Set("crt", m.CrtPath)
 			}
-			if m.keyPath != "" && query.Get("key") == "" {
-				query.Set("key", m.keyPath)
+			if m.KeyPath != "" && query.Get("key") == "" {
+				query.Set("key", m.KeyPath)
 			}
 		}
 	}
@@ -341,10 +341,10 @@ func (m *Master) generateConfigURL(instance *Instance) string {
 	return parsedURL.String()
 }
 
-func (m *Master) setInstanceURL(instance *Instance, updates map[string]string) error {
+func (m *Master) SetInstanceURL(instance *Instance, updates map[string]string) error {
 	parsedURL, err := url.Parse(instance.URL)
 	if err != nil {
-		return fmt.Errorf("invalid URL format: %w", err)
+		return fmt.Errorf("SetInstanceURL: invalid URL format: %w", err)
 	}
 
 	query := parsedURL.Query()
@@ -353,7 +353,7 @@ func (m *Master) setInstanceURL(instance *Instance, updates map[string]string) e
 		switch key {
 		case "type":
 			if value != "client" && value != "server" {
-				return fmt.Errorf("invalid type: must be 'client' or 'server'")
+				return fmt.Errorf("SetInstanceURL: invalid type: must be 'client' or 'server'")
 			}
 			parsedURL.Scheme = value
 			instance.Type = value
@@ -392,23 +392,23 @@ func (m *Master) setInstanceURL(instance *Instance, updates map[string]string) e
 	newURL := parsedURL.String()
 
 	if newURL == instance.URL {
-		return fmt.Errorf("no changes detected")
+		return fmt.Errorf("SetInstanceURL: no changes detected")
 	}
 
 	if instance.Status != "stopped" {
-		m.stopInstance(instance)
-		time.Sleep(baseDuration)
+		m.StopInstance(instance)
+		time.Sleep(BaseDuration)
 	}
 
 	instance.URL = newURL
-	instance.Config = m.generateConfigURL(instance)
+	instance.Config = m.GenerateConfigURL(instance)
 	instance.Status = "stopped"
-	m.instances.Store(instance.ID, instance)
+	m.Instances.Store(instance.ID, instance)
 
-	go m.startInstance(instance)
+	go m.StartInstance(instance)
 	go func() {
-		time.Sleep(baseDuration)
-		m.saveState()
+		time.Sleep(BaseDuration)
+		m.SaveState()
 	}()
 
 	return nil

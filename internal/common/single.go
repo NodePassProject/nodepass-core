@@ -9,24 +9,24 @@ import (
 	"github.com/NodePassProject/conn"
 )
 
-func (c *Common) singleEventLoop() error {
+func (c *Common) SingleEventLoop() error {
 	ticker := time.NewTicker(ReportInterval)
 	defer ticker.Stop()
 
 	for c.Ctx.Err() == nil {
 		c.Logger.Event("CHECK_POINT|MODE=%v|PING=%vms|POOL=0|TCPS=%v|UDPS=%v|TCPRX=%v|TCPTX=%v|UDPRX=%v|UDPTX=%v", c.RunMode, c.ProbeBestTarget(),
-			atomic.LoadInt32(&c.TcpSlot), atomic.LoadInt32(&c.UdpSlot),
-			atomic.LoadUint64(&c.TcpRX), atomic.LoadUint64(&c.TcpTX),
-			atomic.LoadUint64(&c.UdpRX), atomic.LoadUint64(&c.UdpTX))
+			atomic.LoadInt32(&c.TCPSlot), atomic.LoadInt32(&c.UDPSlot),
+			atomic.LoadUint64(&c.TCPRX), atomic.LoadUint64(&c.TCPTX),
+			atomic.LoadUint64(&c.UDPRX), atomic.LoadUint64(&c.UDPTX))
 
 		select {
 		case <-c.Ctx.Done():
-			return fmt.Errorf("singleEventLoop: context error: %w", c.Ctx.Err())
+			return fmt.Errorf("SingleEventLoop: context error: %w", c.Ctx.Err())
 		case <-ticker.C:
 		}
 	}
 
-	return fmt.Errorf("singleEventLoop: context error: %w", c.Ctx.Err())
+	return fmt.Errorf("SingleEventLoop: context error: %w", c.Ctx.Err())
 }
 
 func (c *Common) SingleTCPLoop() error {
@@ -34,19 +34,19 @@ func (c *Common) SingleTCPLoop() error {
 		tunnelConn, err := c.TunnelListener.Accept()
 		if err != nil {
 			if c.Ctx.Err() != nil || err == net.ErrClosed {
-				return fmt.Errorf("singleTCPLoop: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("SingleTCPLoop: context error: %w", c.Ctx.Err())
 			}
-			c.Logger.Error("singleTCPLoop: accept failed: %v", err)
+			c.Logger.Error("SingleTCPLoop: accept failed: %v", err)
 
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("singleTCPLoop: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("SingleTCPLoop: context error: %w", c.Ctx.Err())
 			case <-time.After(ContextCheckInterval):
 			}
 			continue
 		}
 
-		tunnelConn = &conn.StatConn{Conn: tunnelConn, RX: &c.TcpRX, TX: &c.TcpTX, Rate: c.RateLimiter}
+		tunnelConn = &conn.StatConn{Conn: tunnelConn, RX: &c.TCPRX, TX: &c.TCPTX, Rate: c.RateLimiter}
 		c.Logger.Debug("Tunnel connection: %v <-> %v", tunnelConn.LocalAddr(), tunnelConn.RemoteAddr())
 
 		go func(tunnelConn net.Conn) {
@@ -57,7 +57,7 @@ func (c *Common) SingleTCPLoop() error {
 			}()
 
 			if !c.TryAcquireSlot(false) {
-				c.Logger.Error("singleTCPLoop: TCP slot limit reached: %v/%v", c.TcpSlot, c.SlotLimit)
+				c.Logger.Error("SingleTCPLoop: TCP slot limit reached: %v/%v", c.TCPSlot, c.SlotLimit)
 				return
 			}
 
@@ -65,14 +65,14 @@ func (c *Common) SingleTCPLoop() error {
 
 			protocol, wrappedConn := c.DetectBlockProtocol(tunnelConn)
 			if protocol != "" {
-				c.Logger.Warn("singleTCPLoop: blocked %v protocol from %v", protocol, tunnelConn.RemoteAddr())
+				c.Logger.Warn("SingleTCPLoop: blocked %v protocol from %v", protocol, tunnelConn.RemoteAddr())
 				return
 			}
 			tunnelConn = wrappedConn
 
-			targetConn, err := c.DialWithRotation("tcp", TcpDialTimeout)
+			targetConn, err := c.DialWithRotation("tcp", TCPDialTimeout)
 			if err != nil {
-				c.Logger.Error("singleTCPLoop: dialWithRotation failed: %v", err)
+				c.Logger.Error("SingleTCPLoop: dialWithRotation failed: %v", err)
 				return
 			}
 
@@ -85,7 +85,7 @@ func (c *Common) SingleTCPLoop() error {
 			c.Logger.Debug("Target connection: %v <-> %v", targetConn.LocalAddr(), targetConn.RemoteAddr())
 
 			if err := c.SendProxyV1Header(tunnelConn.RemoteAddr().String(), targetConn); err != nil {
-				c.Logger.Error("singleTCPLoop: sendProxyV1Header failed: %v", err)
+				c.Logger.Error("SingleTCPLoop: sendProxyV1Header failed: %v", err)
 				return
 			}
 
@@ -101,7 +101,7 @@ func (c *Common) SingleTCPLoop() error {
 		}(tunnelConn)
 	}
 
-	return fmt.Errorf("singleTCPLoop: context error: %w", c.Ctx.Err())
+	return fmt.Errorf("SingleTCPLoop: context error: %w", c.Ctx.Err())
 }
 
 func (c *Common) SingleUDPLoop() error {
@@ -112,14 +112,14 @@ func (c *Common) SingleUDPLoop() error {
 		if err != nil {
 			if c.Ctx.Err() != nil || err == net.ErrClosed {
 				c.PutUDPBuffer(buffer)
-				return fmt.Errorf("singleUDPLoop: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("SingleUDPLoop: context error: %w", c.Ctx.Err())
 			}
-			c.Logger.Error("singleUDPLoop: ReadFromUDP failed: %v", err)
+			c.Logger.Error("SingleUDPLoop: ReadFromUDP failed: %v", err)
 
 			c.PutUDPBuffer(buffer)
 			select {
 			case <-c.Ctx.Done():
-				return fmt.Errorf("singleUDPLoop: context error: %w", c.Ctx.Err())
+				return fmt.Errorf("SingleUDPLoop: context error: %w", c.Ctx.Err())
 			case <-time.After(ContextCheckInterval):
 			}
 			continue
@@ -135,14 +135,14 @@ func (c *Common) SingleUDPLoop() error {
 			c.Logger.Debug("Using UDP session: %v <-> %v", targetConn.LocalAddr(), targetConn.RemoteAddr())
 		} else {
 			if !c.TryAcquireSlot(true) {
-				c.Logger.Error("singleUDPLoop: UDP slot limit reached: %v/%v", c.UdpSlot, c.SlotLimit)
+				c.Logger.Error("SingleUDPLoop: UDP slot limit reached: %v/%v", c.UDPSlot, c.SlotLimit)
 				c.PutUDPBuffer(buffer)
 				continue
 			}
 
-			newSession, err := c.DialWithRotation("udp", UdpDialTimeout)
+			newSession, err := c.DialWithRotation("udp", UDPDialTimeout)
 			if err != nil {
-				c.Logger.Error("singleUDPLoop: dialWithRotation failed: %v", err)
+				c.Logger.Error("SingleUDPLoop: dialWithRotation failed: %v", err)
 				c.ReleaseSlot(true)
 				c.PutUDPBuffer(buffer)
 				continue
@@ -161,7 +161,7 @@ func (c *Common) SingleUDPLoop() error {
 
 				buffer := c.GetUDPBuffer()
 				defer c.PutUDPBuffer(buffer)
-				reader := &conn.TimeoutReader{Conn: targetConn, Timeout: UdpReadTimeout}
+				reader := &conn.TimeoutReader{Conn: targetConn, Timeout: UDPReadTimeout}
 
 				for c.Ctx.Err() == nil {
 					x, err := reader.Read(buffer)
@@ -169,7 +169,7 @@ func (c *Common) SingleUDPLoop() error {
 						if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 							c.Logger.Debug("UDP session abort: %v", err)
 						} else if err.Error() != "EOF" {
-							c.Logger.Error("singleUDPLoop: read from target failed: %v", err)
+							c.Logger.Error("SingleUDPLoop: read from target failed: %v", err)
 						}
 						c.TargetUDPSession.Delete(sessionKey)
 						if targetConn != nil {
@@ -181,7 +181,7 @@ func (c *Common) SingleUDPLoop() error {
 					_, err = c.TunnelUDPConn.WriteToUDP(buffer[:x], clientAddr)
 					if err != nil {
 						if err.Error() != "EOF" {
-							c.Logger.Error("singleUDPLoop: writeToUDP failed: %v", err)
+							c.Logger.Error("SingleUDPLoop: writeToUDP failed: %v", err)
 						}
 						c.TargetUDPSession.Delete(sessionKey)
 						if targetConn != nil {
@@ -198,19 +198,19 @@ func (c *Common) SingleUDPLoop() error {
 		_, err = targetConn.Write(buffer[:x])
 		if err != nil {
 			if err.Error() != "EOF" {
-				c.Logger.Error("singleUDPLoop: write to target failed: %v", err)
+				c.Logger.Error("SingleUDPLoop: write to target failed: %v", err)
 			}
 			c.TargetUDPSession.Delete(sessionKey)
 			if targetConn != nil {
 				targetConn.Close()
 			}
 			c.PutUDPBuffer(buffer)
-			return fmt.Errorf("singleUDPLoop: write to target failed: %w", err)
+			return fmt.Errorf("SingleUDPLoop: write to target failed: %w", err)
 		}
 
 		c.Logger.Debug("Transfer complete: %v <-> %v", targetConn.LocalAddr(), c.TunnelUDPConn.LocalAddr())
 		c.PutUDPBuffer(buffer)
 	}
 
-	return fmt.Errorf("singleUDPLoop: context error: %w", c.Ctx.Err())
+	return fmt.Errorf("SingleUDPLoop: context error: %w", c.Ctx.Err())
 }
