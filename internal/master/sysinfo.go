@@ -30,7 +30,7 @@ func (m *Master) GetMasterInfo() map[string]any {
 		"name":       m.Hostname,
 		"uptime":     uint64(time.Since(m.StartTime).Seconds()),
 		"log":        m.LogLevel,
-		"tls":        m.TLSConfig,
+		"tls":        m.TLSCode,
 		"crt":        m.CrtPath,
 		"key":        m.KeyPath,
 	}
