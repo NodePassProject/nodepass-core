@@ -69,7 +69,7 @@ func NewMaster(parsedURL *url.URL, tlsCode string, tlsConfig *tls.Config, logger
 		CrtPath:       parsedURL.Query().Get("crt"),
 		KeyPath:       parsedURL.Query().Get("key"),
 		Hostname:      hostname,
-		TLSConfig:     tlsConfig,
+		MTLSConfig:    tlsConfig,
 		MasterURL:     parsedURL,
 		StatePath:     filepath.Join(baseDir, StateFilePath, StateFileName),
 		NotifyChannel: make(chan *InstanceEvent, common.SemaphoreLimit),
@@ -179,12 +179,12 @@ func (m *Master) Run() {
 		Addr:      m.TunnelTCPAddr.String(),
 		ErrorLog:  m.Logger.StdLogger(),
 		Handler:   mux,
-		TLSConfig: m.TLSConfig,
+		TLSConfig: m.MTLSConfig,
 	}
 
 	go func() {
 		var err error
-		if m.TLSConfig != nil {
+		if m.MTLSConfig != nil {
 			err = m.Server.ListenAndServeTLS("", "")
 		} else {
 			err = m.Server.ListenAndServe()

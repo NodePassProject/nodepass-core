@@ -27,7 +27,7 @@ type Master struct {
 	KeyPath       string
 	Instances     sync.Map
 	Server        *http.Server
-	TLSConfig     *tls.Config
+	MTLSConfig    *tls.Config
 	MasterURL     *url.URL
 	StatePath     string
 	StateMu       sync.Mutex
