@@ -153,16 +153,21 @@ func (c *Common) TcpPing(idx int) int {
 }
 
 func (c *Common) GetDialFunc(network string, timeout time.Duration) func(string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: timeout}
-	if c.DialerIP != DefaultDialerIP && atomic.LoadUint32(&c.DialerFallback) == 0 {
-		if network == "tcp" {
-			dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(c.DialerIP)}
-		} else {
-			dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(c.DialerIP)}
-		}
-	}
-
 	return func(addr string) (net.Conn, error) {
+		dialer := &net.Dialer{Timeout: timeout}
+		if c.DialerIP != DefaultDialerIP && atomic.LoadUint32(&c.DialerFallback) == 0 {
+			if parsedIP := net.ParseIP(c.DialerIP); parsedIP != nil {
+				if ipv4 := parsedIP.To4(); ipv4 != nil {
+					parsedIP = ipv4
+				}
+				if network == "tcp" {
+					dialer.LocalAddr = &net.TCPAddr{IP: parsedIP}
+				} else {
+					dialer.LocalAddr = &net.UDPAddr{IP: parsedIP}
+				}
+			}
+		}
+
 		conn, err := dialer.Dial(network, addr)
 		if err != nil && dialer.LocalAddr != nil && atomic.CompareAndSwapUint32(&c.DialerFallback, 0, 1) {
 			c.Logger.Error("GetDialFunc: fallback to system auto due to dialer failure: %v", err)
