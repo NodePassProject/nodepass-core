@@ -51,6 +51,7 @@ Explore the complete documentation to learn more about NodePass:
 
 - [Installation Guide](/docs/installation.md)
 - [Usage Instructions](/docs/usage.md)
+- [CLI Reference](/docs/cli.md)
 - [Configuration Options](/docs/configuration.md)
 - [API Reference](/docs/api.md)
 - [MCP Integration](/docs/mcp.md)
