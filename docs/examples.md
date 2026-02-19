@@ -137,9 +137,44 @@ This setup:
 - Limits logging to warnings and errors only
 - Maps service A's API to appear as a local service on service B
 
+## SNI Configuration for TLS Connections
+
+### Example 9: Custom SNI for SNI-Based Routing
+
+Connect to servers behind SNI-aware load balancers or reverse proxies:
+
+```bash
+# Server side: Standard TLS configuration
+nodepass "server://0.0.0.0:10101/backend.internal:8080?tls=1&mode=2"
+
+# Client side: Specify custom SNI hostname for proper routing
+nodepass "client://loadbalancer.example.com:10101/127.0.0.1:8080?mode=2&sni=api.backend.example.com"
+```
+
+This configuration:
+- Server provides TLS-encrypted tunnel endpoint
+- Client specifies SNI hostname that matches the backend service certificate
+- Load balancer or reverse proxy routes traffic based on SNI value
+- Enables access to multiple services hosted on the same IP address
+
+### Example 9a: SNI for Certificate Validation
+
+Connect using IP address while providing correct SNI for certificate validation:
+
+```bash
+# Connect via IP but specify hostname for TLS certificate validation
+nodepass "client://192.168.1.100:10101/127.0.0.1:8080?mode=2&sni=secure.internal.example.com&log=debug"
+```
+
+This setup:
+- Uses IP address for connection (useful when DNS is unavailable)
+- Provides correct SNI hostname for TLS certificate validation
+- Prevents certificate validation errors when server certificate is issued to a hostname
+- Useful in testing, development, or when bypassing DNS
+
 ## Protocol Blocking and Traffic Filtering
 
-### Example 9: Block Proxy Protocols
+### Example 10: Block Proxy Protocols
 
 Prevent SOCKS and HTTP proxy usage through your tunnel:
 
@@ -157,7 +192,7 @@ This configuration:
 - Allows only application-specific protocols through the tunnel
 - Useful for preventing proxy abuse on application tunnels
 
-### Example 10: Block TLS-in-TLS Scenarios
+### Example 11: Block TLS-in-TLS Scenarios
 
 Prevent nested TLS encryption when outer layer already provides security:
 
@@ -175,7 +210,7 @@ This setup:
 - Prevents unnecessary double encryption overhead
 - Helps identify misconfigurations where applications try to add redundant TLS
 
-### Example 11: Comprehensive Security Policy
+### Example 12: Comprehensive Security Policy
 
 Enforce strict security policy allowing only application traffic:
 
@@ -195,7 +230,7 @@ This configuration:
 - Limits concurrent connections to 500 for resource control
 - Only logs warnings and errors to reduce noise
 
-### Example 12: Selective Protocol Blocking for Development
+### Example 13: Selective Protocol Blocking for Development
 
 Allow HTTP traffic while blocking proxies in development environment:
 
@@ -215,7 +250,7 @@ This setup:
 
 ## Bandwidth Rate Limiting
 
-### Example 13: File Transfer Server with Rate Limit
+### Example 14: File Transfer Server with Rate Limit
 
 Control bandwidth usage for file transfer services:
 
@@ -233,7 +268,7 @@ This configuration:
 - Allows file transfers while preserving bandwidth for other services
 - Uses TLS encryption for secure file transfer
 
-### Example 14: IoT Sensor Data Collection with Conservative Limits
+### Example 15: IoT Sensor Data Collection with Conservative Limits
 
 For IoT devices with limited bandwidth or metered connections:
 
@@ -251,7 +286,7 @@ This setup:
 - Minimal logging (warn/error) to reduce resource usage on IoT devices
 - Efficient for MQTT or other IoT protocols
 
-### Example 15: Development Environment Rate Control
+### Example 16: Development Environment Rate Control
 
 Testing applications under bandwidth constraints:
 
@@ -270,7 +305,7 @@ This configuration:
 
 ## IoT Device Management
 
-### Example 16: IoT Gateway
+### Example 17: IoT Gateway
 
 Create a central access point for IoT devices:
 
@@ -291,7 +326,7 @@ This configuration:
 
 ## Multi-Homed Systems and Source IP Control
 
-### Example 17: Specific Network Interface Selection
+### Example 18: Specific Network Interface Selection
 
 Control which network interface is used for outbound connections on multi-homed systems:
 
@@ -310,7 +345,7 @@ This configuration:
 - Automatically falls back to system-selected IP if specified address fails
 - Supports both IPv4 and IPv6 addresses
 
-### Example 18: Network Segmentation and VLAN Routing
+### Example 19: Network Segmentation and VLAN Routing
 
 Direct traffic through specific network segments or VLANs:
 
@@ -341,7 +376,7 @@ This setup:
 
 ## DNS Cache TTL Configuration
 
-### Example 19: Stable Corporate Network
+### Example 20: Stable Corporate Network
 
 Use longer TTL for stable internal services:
 
@@ -359,7 +394,7 @@ This configuration:
 - Improves connection performance by minimizing DNS lookups
 - Suitable for production environments with stable DNS
 
-### Example 20: Dynamic DNS Environments
+### Example 21: Dynamic DNS Environments
 
 Use shorter TTL for frequently changing DNS records:
 
@@ -377,7 +412,7 @@ This setup:
 - Ensures connections use current DNS records
 - Ideal for cloud environments with frequent IP changes
 
-### Example 21: Development and Testing
+### Example 22: Development and Testing
 
 Disable caching for development environments:
 
@@ -395,7 +430,7 @@ This configuration:
 - Useful during development when DNS records change frequently
 - Helps identify DNS-related issues during testing
 
-### Example 22: Mixed Environment with Custom TTL
+### Example 23: Mixed Environment with Custom TTL
 
 Balance performance and freshness with moderate TTL:
 
@@ -425,7 +460,7 @@ This setup:
 
 ## High Availability and Load Balancing
 
-### Example 23: Multi-Backend Server Load Balancing
+### Example 24: Multi-Backend Server Load Balancing
 
 Use target address groups for even traffic distribution and automatic failover:
 
@@ -443,7 +478,30 @@ This configuration:
 - Automatically resumes sending traffic to recovered servers
 - Uses TLS encryption to secure the tunnel
 
-### Example 24: Database Primary-Replica Failover
+### Example 23a: Load Balancing with Different Strategies
+
+NodePass supports three load balancing strategies for multiple targets:
+
+```bash
+# Strategy 0: Round-robin (default) - Cycles through targets evenly
+nodepass "server://0.0.0.0:10101/web1.internal:8080,web2.internal:8080,web3.internal:8080?mode=2&tls=1&lbs=0"
+
+# Strategy 1: Optimal-latency - Routes to the fastest responding target
+nodepass "server://0.0.0.0:10101/api1.internal:8080,api2.internal:8080,api3.internal:8080?mode=2&tls=1&lbs=1"
+
+# Strategy 2: Primary-backup - Prefers first target, uses others only on failure
+nodepass "server://0.0.0.0:10101/primary.internal:8080,backup1.internal:8080,backup2.internal:8080?mode=2&tls=1&lbs=2"
+
+# Client side for all strategies
+nodepass "client://server.example.com:10101/127.0.0.1:8080?log=info"
+```
+
+Choose the appropriate strategy based on your needs:
+- **lbs=0 (Round-robin)**: Best for even load distribution across equal capacity servers
+- **lbs=1 (Optimal-latency)**: Best for geographically distributed servers or mixed capacity environment
+- **lbs=2 (Primary-backup)**: Best for cost optimization (keep backup cold) or when you have a preferred primary server
+
+### Example 25: Database Primary-Replica Failover
 
 Configure primary and replica database instances for high availability access:
 
@@ -458,7 +516,7 @@ This setup:
 - Application requires no modification for transparent failover
 - Logs only warnings and errors to reduce output
 
-### Example 25: API Gateway Backend Pool
+### Example 26: API Gateway Backend Pool
 
 Configure multiple backend service instances for an API gateway:
 
@@ -476,7 +534,7 @@ This configuration:
 - Client limits bandwidth to 100 Mbps with maximum 2000 concurrent connections
 - Single instance failure doesn't affect overall service availability
 
-### Example 26: Geo-Distributed Services
+### Example 27: Geo-Distributed Services
 
 Configure multi-region service nodes to optimize network latency:
 
@@ -500,7 +558,7 @@ This setup:
 
 ## PROXY Protocol Integration
 
-### Example 27: Load Balancer Integration with PROXY Protocol
+### Example 28: Load Balancer Integration with PROXY Protocol
 
 Enable PROXY protocol support for integration with load balancers and reverse proxies:
 
@@ -519,7 +577,7 @@ This configuration:
 - Compatible with HAProxy, Nginx, and other PROXY protocol aware services
 - Useful for maintaining accurate access logs and IP-based access controls
 
-### Example 28: Reverse Proxy Support for Web Applications
+### Example 29: Reverse Proxy Support for Web Applications
 
 Enable web applications behind NodePass to receive original client information:
 
@@ -543,7 +601,7 @@ This setup:
 - Supports compliance requirements for connection auditing
 - Works with web servers that support PROXY protocol (Nginx, HAProxy, etc.)
 
-### Example 29: Database Access with Client IP Preservation
+### Example 30: Database Access with Client IP Preservation
 
 Maintain client IP information for database access logging and security:
 
@@ -570,7 +628,7 @@ Benefits:
 
 ## Container Deployment
 
-### Example 30: Containerized NodePass
+### Example 31: Containerized NodePass
 
 Deploy NodePass in a Docker environment:
 
@@ -605,7 +663,7 @@ This configuration:
 
 ## Master API Management
 
-### Example 31: Centralized Management
+### Example 32: Centralized Management
 
 Set up a central controller for multiple NodePass instances:
 
@@ -642,7 +700,7 @@ This setup:
 - Offers a RESTful API for automation and integration
 - Includes a built-in Swagger UI at http://localhost:9090/api/v1/docs
 
-### Example 32: Custom API Prefix
+### Example 33: Custom API Prefix
 
 Use a custom API prefix for the master mode:
 
@@ -661,7 +719,7 @@ This allows:
 - Custom URL paths for security or organizational purposes
 - Swagger UI access at http://localhost:9090/admin/v1/docs
 
-### Example 33: Real-time Connection and Traffic Monitoring
+### Example 34: Real-time Connection and Traffic Monitoring
 
 Monitor instance connection counts and traffic statistics through the master API:
 
@@ -701,7 +759,7 @@ This monitoring setup provides:
 
 ## Connection Pool Types
 
-### Example 34: QUIC-based Tunnel with Stream Multiplexing
+### Example 35: QUIC-based Tunnel with Stream Multiplexing
 
 Use QUIC protocol for connection pooling with improved performance in high-latency networks:
 
@@ -721,7 +779,7 @@ This configuration:
 - Improved connection establishment with 0-RTT support
 - Client automatically receives pool type configuration from server during handshake
 
-### Example 35: QUIC Pool with Custom TLS Certificate
+### Example 36: QUIC Pool with Custom TLS Certificate
 
 Deploy QUIC tunnel with verified certificates for production:
 
@@ -740,7 +798,7 @@ This setup:
 - Full certificate validation on client side
 - Pool type configuration automatically delivered from server
 
-### Example 36: WebSocket Pool for Proxy Traversal
+### Example 37: WebSocket Pool for Proxy Traversal
 
 Use WebSocket pool behind enterprise firewalls:
 
@@ -762,7 +820,7 @@ This configuration:
 - Client automatically adopts server's pool type configuration
 - **Note**: WebSocket pool does not support unencrypted mode (tls=0)
 
-### Example 37: HTTP/2 Pool for High-Concurrency Environments
+### Example 38: HTTP/2 Pool for High-Concurrency Environments
 
 Use HTTP/2 pool for efficient multiplexed streams with protocol optimization:
 
@@ -785,7 +843,7 @@ This configuration:
 - Client automatically adopts server's pool type configuration
 - Ideal for high-concurrency scenarios benefiting from stream multiplexing
 
-### Example 38: QUIC Pool for Mobile/High-Latency Networks
+### Example 39: QUIC Pool for Mobile/High-Latency Networks
 
 Optimize for mobile networks or satellite connections:
 
@@ -805,7 +863,7 @@ This configuration:
 - 0-RTT reconnection for faster recovery after network changes
 - Client automatically adopts pool type from server
 
-### Example 39: Pool Type Performance Comparison
+### Example 40: Pool Type Performance Comparison
 
 Side-by-side comparison of TCP, QUIC, WebSocket, and HTTP/2 pools:
 
@@ -853,7 +911,7 @@ nodepass "client://server.example.com:10104/127.0.0.1:8083?mode=2&min=128&log=ev
 - Works with HTTP/2-aware infrastructure
 - Ideal for HTTP/HTTPS-only policy environments
 
-### Example 40: QUIC Pool for Real-Time Applications
+### Example 41: QUIC Pool for Real-Time Applications
 
 Configure QUIC tunnel for gaming, VoIP, or video streaming:
 

@@ -167,6 +167,44 @@ nodepass "server://0.0.0.0:10101/backend.example.com:8080?dns=10m&log=info&tls=1
 - Tunnel address DNS resolution occurs once at startup
 - Target address DNS resolution uses caching for repeated connections
 
+## SNI (Server Name Indication) Configuration
+
+NodePass supports custom SNI hostname configuration for TLS connections in client mode. SNI allows clients to specify which hostname they are trying to connect to during the TLS handshake, which is essential for servers that host multiple TLS-enabled services on a single IP address.
+
+- `sni`: Server Name Indication hostname (client mode only)
+  - Default: Uses the hostname from the tunnel address (if available)
+  - Custom hostname: Overrides the default SNI hostname for TLS handshake
+  - Only applicable in client mode when connecting to servers with TLS enabled
+  - Useful when connecting through proxies or when server uses SNI-based routing
+  - The hostname must match one of the names in the server's TLS certificate
+
+**SNI Configuration Use Cases:**
+- **SNI-Based Routing**: Connect to servers behind SNI-aware load balancers or reverse proxies
+- **Virtual Hosting**: Access services hosted on shared infrastructure with multiple hostnames
+- **Certificate Validation**: Ensure TLS certificate validation succeeds when using alternative hostnames
+- **Proxy Environments**: Override SNI when connecting through intermediate proxies
+- **Testing**: Test different SNI values without changing DNS or connection addresses
+
+Example configurations:
+
+```bash
+# Client with custom SNI for SNI-based routing
+nodepass "client://10.1.0.1:10101/127.0.0.1:8080?mode=2&sni=backend.example.com"
+
+# Client connecting via IP but requiring specific SNI for certificate validation
+nodepass "client://192.168.1.100:10101/127.0.0.1:8080?mode=2&sni=secure.internal.example.com"
+
+# Combined with other TLS parameters
+nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2&sni=api.backend.example.com&dns=30s"
+```
+
+**Important Notes:**
+- SNI is only used in client mode and only when the server has TLS enabled (tls = 2)
+- The SNI hostname must be a valid DNS hostname (not an IP address)
+- If not specified, NodePass automatically uses the hostname from the tunnel address
+- When tunnel address is an IP, SNI defaults to a generic value unless explicitly set
+- Incorrect SNI may cause TLS handshake failures if server enforces strict SNI validation
+
 ## Outbound Connection Source IP Control
 
 NodePass supports specifying the local IP address used for outbound connections to target addresses. This feature is useful for systems with multiple network interfaces where traffic routing needs to be controlled explicitly.

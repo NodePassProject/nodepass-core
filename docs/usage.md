@@ -4,43 +4,87 @@ NodePass creates tunnels with an unencrypted TCP control channel and configurabl
 
 ## Command Line Syntax
 
-The general syntax for NodePass commands is:
+NodePass supports two command-line syntax formats that provide the same functionality. Choose the format that best fits your workflow and preference.
+
+### URL-Based Syntax
+
+The URL-based syntax provides a compact and expressive configuration format:
 
 ```bash
-nodepass "<core>://<tunnel_addr>/<target_addr>?log=<level>&tls=<mode>&crt=<cert_file>&key=<key_file>&dns=<duration>&min=<min_pool>&max=<max_pool>&mode=<run_mode>&type=<pool_type>&dial=<source_ip>&read=<timeout>&rate=<mbps>&slot=<limit>&proxy=<mode>&notcp=<0|1>&noudp=<0|1>"
+nodepass "<mode>://<tunnel_addr>/<target_addr>?param1=value1&param2=value2"
 ```
 
+**Advantages:**
+- Compact and easy to use in scripts and configuration files
+- Single string contains all parameters
+- Easy to pass as environment variables in containerized deployments
+- Ideal for automation and quick testing
+
+**Example:**
+```bash
+nodepass "server://0.0.0.0:10101/0.0.0.0:8080?log=info&tls=1&max=2048"
+```
+
+### Flag-Based Syntax
+
+The flag-based syntax uses traditional command-line flags:
+
+```bash
+nodepass <mode> --tunnel-addr <addr> --tunnel-port <port> --target-addr <addr> --target-port <port> [--option value ...]
+```
+
+**Advantages:**
+- More readable when typing commands interactively
+- Explicit parameter names make configuration self-documenting
+- Easier to understand for users familiar with traditional Unix tools
+- Supports shell completion for parameter discovery
+
+**Example:**
+```bash
+nodepass server \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 10101 \
+  --target-addr 0.0.0.0 \
+  --target-port 8080 \
+  --log info \
+  --tls 1 \
+  --max 2048
+```
+
+### Parameter Overview
+
 Where:
-- `<core>`: Specifies the operating mode (`server`, `client`, or `master`)
-- `<tunnel_addr>`: The tunnel endpoint address for control channel communications 
-- `<target_addr>`: The destination address for business data with bidirectional flow support (or API prefix in master mode)
+- `<mode>`: Operating mode - `server`, `client`, or `master`
+- `<tunnel_addr>`: Tunnel endpoint address for control channel communications
+- `<target_addr>`: Destination address for business data with bidirectional flow support (or API prefix in master mode)
 
-### Query Parameters
+### Common Parameters
 
-Common query parameters:
-- `log=<level>`: Log verbosity level (`none`, `debug`, `info`, `warn`, `error`, or `event`)
-- `dns=<duration>`: DNS cache TTL duration (default: `5m`, supports time units like `1h`, `30m`, `15s`, etc.)
-- `min=<min_pool>`: Minimum connection pool capacity (default: 64, set by client)
-- `max=<max_pool>`: Maximum connection pool capacity (default: 1024, set by server and delivered to client)
-- `mode=<run_mode>`: Run mode control (`0`, `1`, or `2`) - controls operational behavior
-- `type=<pool_type>`: Connection pool type (`0` for TCP pool, `1` for QUIC UDP pool, `2` for WebSocket/WSS pool, `3` for HTTP/2 pool, default: 0, server-side only)
-- `dial=<source_ip>`: Source IP address for outbound connections (default: `auto`, supports both IPv4 and IPv6)
-- `read=<timeout>`: Data read timeout duration (default: 0, supports time units like 30s, 5m, 1h, etc.)
-- `rate=<mbps>`: Bandwidth rate limit in Mbps (default: 0 for unlimited)
-- `slot=<limit>`: Maximum concurrent connection limit (default: 65536, 0 for unlimited)
-- `proxy=<mode>`: PROXY protocol support (default: `0`, `1` enables PROXY protocol v1 header transmission)
-- `notcp=<0|1>`: TCP support control (default: `0` enabled, `1` disabled)
-- `noudp=<0|1>`: UDP support control (default: `0` enabled, `1` disabled)
+All parameters can be specified using either URL query parameters or command-line flags:
 
-TLS-related parameters (server/master modes only):
-- `tls=<mode>`: TLS security level for data channels (`0`, `1`, or `2`)
-- `crt=<cert_file>`: Path to certificate file (when `tls=2`)
-- `key=<key_file>`: Path to private key file (when `tls=2`)
+| Parameter | Flag | Description | Default | Valid Values |
+|-----------|------|-------------|---------|--------------|
+| `log` | `--log` | Log verbosity level | `info` | `none`, `debug`, `info`, `warn`, `error`, `event` |
+| `dns` | `--dns` | DNS cache TTL duration | `5m` | Time units: `1h`, `30m`, `15s`, etc. |
+| `sni` | `--sni` | SNI hostname for TLS (client only) | auto | Hostname string |
+| `lbs` | `--lbs` | Load balancing strategy | `0` | `0`=random, `1`=roundrobin, `2`=leastconn |
+| `min` | `--min` | Minimum pool capacity (client) | `64` | Positive integer |
+| `max` | `--max` | Maximum pool capacity (server) | `1024` | Positive integer |
+| `mode` | `--mode` | Run mode control | `0` | `0`=auto, `1`=force-mode-1, `2`=force-mode-2 |
+| `type` | `--type` | Connection pool type (server) | `0` | `0`=TCP, `1`=QUIC, `2`=WebSocket, `3`=HTTP/2 |
+| `tls` | `--tls` | TLS encryption mode | `0` | `0`=none, `1`=self-signed, `2`=custom |
+| `crt` | `--crt` | Certificate file path | N/A | File path (when `tls=2`) |
+| `key` | `--key` | Private key file path | N/A | File path (when `tls=2`) |
+| `dial` | `--dial` | Source IP for outbound | `auto` | IP address or `auto` |
+| `read` | `--read` | Data read timeout | `0` | Time units: `30s`, `5m`, `1h`, etc. |
+| `rate` | `--rate` | Bandwidth rate limit (Mbps) | `0` | `0`=unlimited or positive integer |
+| `slot` | `--slot` | Max concurrent connections | `65536` | `0`=unlimited or positive integer |
+| `proxy` | `--proxy` | PROXY protocol support | `0` | `0`=disabled, `1`=enabled |
+| `block` | `--block` | Protocol blocking | `0` | Digits: `1`=SOCKS, `2`=HTTP, `3`=TLS |
+| `notcp` | `--notcp` | Disable TCP | `0` | `0`=enabled, `1`=disabled |
+| `noudp` | `--noudp` | Disable UDP | `0` | `0`=enabled, `1`=disabled |
 
-Connection pool type (server mode only):
-- `type=<mode>`: Connection pool type (`0` for TCP pool, `1` for QUIC UDP pool, `2` for WebSocket/WSS pool, default: 0)
-  - Server configuration is automatically delivered to client during handshake
-  - Client does not need to specify type parameter
+**Note:** For detailed flag-based syntax and complete parameter reference, see the [CLI Reference](/docs/cli.md).
 
 ## Operating Modes
 
@@ -107,6 +151,8 @@ Server mode supports automatic mode detection or forced mode selection through t
 
 #### Examples
 
+**URL-Based Syntax:**
+
 ```bash
 # Automatic mode detection with no TLS encryption
 nodepass "server://10.1.0.1:10101/10.1.0.1:8080?log=debug&tls=0"
@@ -117,6 +163,9 @@ nodepass "server://10.1.0.1:10101/10.1.0.1:8080?log=debug&tls=1&mode=1"
 # Force forward mode with custom certificate
 nodepass "server://10.1.0.1:10101/192.168.1.100:8080?log=debug&tls=2&mode=2&crt=/path/to/cert.pem&key=/path/to/key.pem"
 
+# Multiple targets with load balancing
+nodepass "server://10.1.0.1:10101/10.1.0.1:8080,10.1.0.2:8080,10.1.0.3:8080?log=debug&lbs=1&tls=1"
+
 # QUIC pool with automatic TLS
 nodepass "server://10.1.0.1:10101/192.168.1.100:8080?log=debug&type=1&mode=2"
 
@@ -125,6 +174,72 @@ nodepass "server://10.1.0.1:10101/192.168.1.100:8080?log=debug&type=2&tls=2&mode
 
 # HTTP/2 pool with automatic TLS
 nodepass "server://10.1.0.1:10101/192.168.1.100:8080?log=debug&type=3&mode=2&tls=1"
+
+# Block SOCKS protocols
+nodepass "server://10.1.0.1:10101/10.1.0.1:8080?block=1&log=info"
+```
+
+**Flag-Based Syntax:**
+
+```bash
+# Automatic mode detection with no TLS encryption
+nodepass server \
+  --tunnel-addr 10.1.0.1 \
+  --tunnel-port 10101 \
+  --target-addr 10.1.0.1 \
+  --target-port 8080 \
+  --log debug \
+  --tls 0
+
+# Force reverse mode with self-signed certificate
+nodepass server \
+  --tunnel-addr 10.1.0.1 \
+  --tunnel-port 10101 \
+  --target-addr 10.1.0.1 \
+  --target-port 8080 \
+  --log debug \
+  --tls 1 \
+  --mode 1
+
+# Force forward mode with custom certificate
+nodepass server \
+  --tunnel-addr 10.1.0.1 \
+  --tunnel-port 10101 \
+  --target-addr 192.168.1.100 \
+  --target-port 8080 \
+  --log debug \
+  --tls 2 \
+  --mode 2 \
+  --crt /path/to/cert.pem \
+  --key /path/to/key.pem
+
+# Multiple targets with load balancing
+nodepass server \
+  --tunnel-addr 10.1.0.1 \
+  --tunnel-port 10101 \
+  --targets "10.1.0.1:8080,10.1.0.2:8080,10.1.0.3:8080" \
+  --log debug \
+  --lbs 1 \
+  --tls 1
+
+# QUIC pool with automatic TLS
+nodepass server \
+  --tunnel-addr 10.1.0.1 \
+  --tunnel-port 10101 \
+  --target-addr 192.168.1.100 \
+  --target-port 8080 \
+  --log debug \
+  --type 1 \
+  --mode 2
+
+# Block SOCKS protocols
+nodepass server \
+  --tunnel-addr 10.1.0.1 \
+  --tunnel-port 10101 \
+  --target-addr 10.1.0.1 \
+  --target-port 8080 \
+  --block 1 \
+  --log info
 ```
 
 ### Client Mode
@@ -186,6 +301,8 @@ Client mode supports automatic mode detection or forced mode selection through t
 
 #### Examples
 
+**URL-Based Syntax:**
+
 ```bash
 # Automatic mode detection - Local proxy listening on port 1080, forwarding to target server
 nodepass "client://127.0.0.1:1080/target.example.com:8080?log=debug"
@@ -193,23 +310,112 @@ nodepass "client://127.0.0.1:1080/target.example.com:8080?log=debug"
 # Force single-end forwarding mode - High performance local proxy
 nodepass "client://127.0.0.1:1080/target.example.com:8080?mode=1&log=debug"
 
-# Force dual-end handshake mode - Connect to NodePass server and adopt its TLS security policy
+# Force dual-end handshake mode - Connect to NodePass server
 nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2"
 
 # Connect with debug logging and custom connection pool capacity
 nodepass "client://server.example.com:10101/192.168.1.100:8080?log=debug&min=128"
 
+# Multiple targets with load balancing
+nodepass "client://127.0.0.1:1080/10.1.0.1:8080,10.1.0.2:8080?lbs=2&mode=1"
+
+# Custom SNI hostname for TLS
+nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2&sni=backend.internal.example.com"
+
 # Resource-constrained configuration with forced mode
 nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2&min=16&log=info"
 
-# Resource-constrained configuration - Small connection pool
-nodepass "client://server.example.com:10101/127.0.0.1:8080?min=16&log=info"
-
-# Client automatically receives pool type configuration from server (no type parameter needed)
-nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2&min=128&log=debug"
-
-# Client for real-time applications (pool type config from server)
+# Client for real-time applications
 nodepass "client://server.example.com:10101/127.0.0.1:7777?mode=2&min=64&read=30s"
+
+# Block SOCKS and HTTP protocols
+nodepass "client://127.0.0.1:1080/target.example.com:8080?block=12&mode=1"
+
+# Custom DNS cache TTL for dynamic environments
+nodepass "client://server.example.com:10101/database.local:3306?dns=30s&mode=2"
+```
+
+**Flag-Based Syntax:**
+
+```bash
+# Automatic mode detection - Local proxy
+nodepass client \
+  --tunnel-addr 127.0.0.1 \
+  --tunnel-port 1080 \
+  --target-addr target.example.com \
+  --target-port 8080 \
+  --log debug
+
+# Force single-end forwarding mode
+nodepass client \
+  --tunnel-addr 127.0.0.1 \
+  --tunnel-port 1080 \
+  --target-addr target.example.com \
+  --target-port 8080 \
+  --mode 1 \
+  --log debug
+
+# Force dual-end handshake mode
+nodepass client \
+  --tunnel-addr server.example.com \
+  --tunnel-port 10101 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --mode 2
+
+# Connect with custom connection pool capacity
+nodepass client \
+  --tunnel-addr server.example.com \
+  --tunnel-port 10101 \
+  --target-addr 192.168.1.100 \
+  --target-port 8080 \
+  --log debug \
+  --min 128
+
+# Multiple targets with load balancing
+nodepass client \
+  --tunnel-addr 127.0.0.1 \
+  --tunnel-port 1080 \
+  --targets "10.1.0.1:8080,10.1.0.2:8080" \
+  --lbs 2 \
+  --mode 1
+
+# Custom SNI hostname for TLS
+nodepass client \
+  --tunnel-addr server.example.com \
+  --tunnel-port 10101 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --mode 2 \
+  --sni backend.internal.example.com
+
+# Resource-constrained configuration
+nodepass client \
+  --tunnel-addr server.example.com \
+  --tunnel-port 10101 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --mode 2 \
+  --min 16 \
+  --log info
+
+# Block SOCKS and HTTP protocols
+nodepass client \
+  --tunnel-addr 127.0.0.1 \
+  --tunnel-port 1080 \
+  --target-addr target.example.com \
+  --target-port 8080 \
+  --block 12 \
+  --mode 1
+
+# Custom DNS cache TTL
+nodepass client \
+  --tunnel-addr server.example.com \
+  --tunnel-port 10101 \
+  --target-addr database.local \
+  --target-port 3306 \
+  --dns 30s \
+  --mode 2
 ```
 
 ### Master Mode (API)
@@ -259,6 +465,8 @@ All endpoints are relative to the configured prefix (default: `/api`):
 
 #### Examples
 
+**URL-Based Syntax:**
+
 ```bash
 # Start master with HTTP using default API prefix (/api)
 nodepass "master://0.0.0.0:9090?log=info"
@@ -272,6 +480,34 @@ nodepass "master://0.0.0.0:9090/admin?log=info&tls=1"
 # Start master with HTTPS (custom certificate)
 nodepass "master://0.0.0.0:9090?log=info&tls=2&crt=/path/to/cert.pem&key=/path/to/key.pem"
 ```
+
+**Flag-Based Syntax:**
+
+```bash
+# Start master with HTTP using default API prefix
+nodepass master \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 9090 \
+  --log info
+
+# Start master with HTTPS (self-signed certificate)
+nodepass master \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 9090 \
+  --log info \
+  --tls 1
+
+# Start master with HTTPS (custom certificate)
+nodepass master \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 9090 \
+  --log info \
+  --tls 2 \
+  --crt /path/to/cert.pem \
+  --key /path/to/key.pem
+```
+
+**Note:** For custom API prefix with flag-based syntax, include the prefix in the path portion of the configuration. See the [CLI Reference](/docs/cli.md) for details.
 
 ## Managing NodePass Instances
 
@@ -383,6 +619,64 @@ The handshake process between client and server is as follows:
 5. **Connection Established**: Handshake complete, data transmission begins
 
 This design ensures that only clients with the correct key can establish tunnel connections, while allowing the server to centrally manage connection pool capacity.
+
+## Choosing Between Syntax Formats
+
+Both URL-based and flag-based syntaxes provide identical functionality. Choose based on your use case:
+
+### Use URL-Based Syntax When:
+
+- **Automation & Scripting**: Compact single-string format is easier to manage in scripts
+- **Configuration Files**: Store complete configurations in config files or environment variables
+- **Container Deployments**: Pass configuration via Docker/Kubernetes environment variables
+- **Quick Testing**: Minimal typing for rapid prototyping and testing
+- **Documentation**: Copy-paste friendly for sharing configurations
+
+**Example:**
+```bash
+export NODEPASS_SERVER="server://0.0.0.0:10101/0.0.0.0:8080?tls=1&log=info"
+nodepass "$NODEPASS_SERVER"
+```
+
+### Use Flag-Based Syntax When:
+
+- **Manual Operation**: More readable when typing commands interactively
+- **Learning**: Explicit parameter names make configurations self-documenting
+- **Incremental Building**: Build commands step-by-step with shell completion
+- **Variable Interpolation**: Parameter values come from shell variables
+- **Team Environments**: Clearer for teams less familiar with URL encoding
+
+**Example:**
+```bash
+TUNNEL_PORT=10101
+TARGET_PORT=8080
+nodepass server \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port $TUNNEL_PORT \
+  --target-addr 0.0.0.0 \
+  --target-port $TARGET_PORT \
+  --tls 1 \
+  --log info
+```
+
+### Mixing Syntaxes
+
+You cannot mix URL query parameters with command-line flags in the same invocation. Choose one syntax format and use it consistently for each command.
+
+**Valid:**
+```bash
+# URL-based only
+nodepass "server://0.0.0.0:10101/0.0.0.0:8080?tls=1"
+
+# Flag-based only
+nodepass server --tunnel-addr 0.0.0.0 --tunnel-port 10101 --target-addr 0.0.0.0 --target-port 8080 --tls 1
+```
+
+**Invalid:**
+```bash
+# Do NOT mix syntaxes
+nodepass "server://0.0.0.0:10101/0.0.0.0:8080" --tls 1  # Wrong!
+```
 
 ## Next Steps
 
