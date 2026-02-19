@@ -339,11 +339,12 @@ nodepass "client://server.example.com:10101/127.0.0.1:8080?dial=192.168.1.50&mod
 ```
 
 This configuration:
-- Forces outbound connections to use specific local IP address
+- Forces outbound connections to use the specified local IP address exclusively
 - Useful for systems with multiple network interfaces (e.g., separate public/private networks)
 - Enables policy-based routing by source IP
-- Automatically falls back to system-selected IP if specified address fails
+- Verifies that outbound connections actually use the specified IP
 - Supports both IPv4 and IPv6 addresses
+- Connections fail if the specified IP cannot be bound or used
 
 ### Example 19: Network Segmentation and VLAN Routing
 
@@ -364,7 +365,7 @@ This setup:
 - Separates management and production traffic at the network layer
 - Ensures traffic follows designated network paths based on source IP
 - Complies with network security policies requiring source-based routing
-- Automatic fallback prevents connection failures from misconfiguration
+- Enforces the specified IP is used for all outbound connections
 - `dial=auto` (default) lets the system choose the appropriate source IP
 
 **Source IP Control Use Cases**:
@@ -373,6 +374,7 @@ This setup:
 - **Firewall Compliance**: Matching firewall rules that filter by source address
 - **Load Distribution**: Distributing outbound traffic across multiple network links
 - **Network Testing**: Simulating traffic from specific network locations
+- **IP Enforcement**: Guaranteeing traffic uses only specified source IP
 
 ## DNS Cache TTL Configuration
 

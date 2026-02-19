@@ -214,10 +214,10 @@ NodePass supports specifying the local IP address used for outbound connections 
   - Valid IP address: Forces all outbound connections to use the specified local IP address
   - Applies to both TCP and UDP connections to target addresses
   - Applies to both client and server modes
-  - Automatic fallback to system-selected IP if the specified address fails
-  - Invalid IP addresses trigger an error log and fallback to auto mode
+  - Only the specified IP will be used; if binding fails, the connection is rejected
+  - Invalid IP addresses trigger an error log and use fallback to auto mode
 
-The `dial` parameter provides precise control over which network interface NodePass uses for outbound connections, enabling advanced network configurations such as:
+The `dial` parameter provides precise control over which network interface NodePass uses for outbound connections. When a specific IP is configured, NodePass will enforce its use and verify that outbound connections actually use the specified IP address.
 
 Example:
 ```bash
@@ -238,18 +238,17 @@ nodepass "server://0.0.0.0:10101/remote.example.com:8080?log=info&tls=1&dial=10.
 - **Firewall Rules**: Match specific firewall rules that filter by source IP
 - **Load Distribution**: Distribute outbound traffic across multiple network links
 - **Testing**: Simulate traffic from specific network locations or interfaces
-
-**Automatic Fallback Behavior:**
-- If the specified IP address cannot be bound (e.g., doesn't exist on the system), NodePass logs an error and automatically falls back to system-selected IP
-- The fallback only occurs once per instance - after fallback, all subsequent connections use auto mode
-- Fallback is logged at ERROR level for visibility: "dialWithRotation: fallback to system auto due to dialer failure"
+- **IP Enforcement**: Guarantee outbound traffic uses only specified source IP
 
 **Important Notes:**
 - The specified IP must exist on the local system and be properly configured
 - Source IP applies only to outbound connections to target addresses, not tunnel connections
-- IPv4 and IPv6 addresses are both supported (address family must match target address)
-- Binding failures trigger automatic fallback to prevent connection failures
+- IPv4 and IPv6 addresses are both supported
+- When a specific IP is provided, its address family (IPv4 or IPv6) must match the target address family
+- Connections will fail if the specified IP cannot be bound or if the actual connection doesn't use the specified IP
+- If an invalid IP address is provided, NodePass logs an error and falls back to auto mode
 - This parameter does not affect incoming tunnel connections or server listen addresses
+- The system verifies that each outbound connection actually originates from the specified IP address
 
 ## Connection Pool Types
 
