@@ -166,6 +166,7 @@ func (c *Common) GetDialerIP() {
 	if dialerIP := c.ParsedURL.Query().Get("dial"); dialerIP != "" && dialerIP != "auto" {
 		if ip := net.ParseIP(dialerIP); ip != nil {
 			c.DialerIP = dialerIP
+			c.DialerIPv6 = ip.To4() == nil
 			return
 		} else {
 			c.Logger.Error("GetDialerIP: fallback to system auto due to invalid IP address: %v", dialerIP)

@@ -72,7 +72,7 @@ type Common struct {
 	ServerPort       string
 	ClientIP         string
 	DialerIP         string
-	DialerFallback   uint32
+	DialerIPv6       bool
 	TunnelKey        string
 	TunnelAddr       string
 	TunnelTCPAddr    *net.TCPAddr
