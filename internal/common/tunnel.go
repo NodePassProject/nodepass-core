@@ -181,14 +181,13 @@ func (c *Common) TunnelUDPLoop() {
 
 				buffer := c.GetUDPBuffer()
 				defer c.PutUDPBuffer(buffer)
-				reader := &conn.TimeoutReader{Conn: remoteConn, Timeout: UDPReadTimeout}
 
 				for c.Ctx.Err() == nil {
-					x, err := reader.Read(buffer)
+					x, err := readUDPFrame(remoteConn, buffer, UDPReadTimeout)
 					if err != nil {
 						if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 							c.Logger.Debug("UDP session abort: %v", err)
-						} else if err != io.EOF {
+						} else if err != io.EOF && err != io.ErrUnexpectedEOF {
 							c.Logger.Error("TunnelUDPLoop: read from tunnel failed: %v", err)
 						}
 						return
@@ -218,8 +217,7 @@ func (c *Common) TunnelUDPLoop() {
 			c.Logger.Debug("Starting transfer: %v <-> %v", remoteConn.LocalAddr(), c.TargetUDPConn.LocalAddr())
 		}
 
-		_, err = remoteConn.Write(buffer[:x])
-		if err != nil {
+		if err = writeUDPFrame(remoteConn, buffer[:x]); err != nil {
 			if err != io.EOF {
 				c.Logger.Error("TunnelUDPLoop: write to tunnel failed: %v", err)
 			}
@@ -420,14 +418,13 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 
 		buffer := c.GetUDPBuffer()
 		defer c.PutUDPBuffer(buffer)
-		reader := &conn.TimeoutReader{Conn: remoteConn, Timeout: UDPReadTimeout}
 
 		for c.Ctx.Err() == nil {
-			x, err := reader.Read(buffer)
+			x, err := readUDPFrame(remoteConn, buffer, UDPReadTimeout)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					c.Logger.Debug("UDP session abort: %v", err)
-				} else if err != io.EOF {
+				} else if err != io.EOF && err != io.ErrUnexpectedEOF {
 					c.Logger.Error("TunnelUDPOnce: read from tunnel failed: %v", err)
 				}
 				return
@@ -450,10 +447,12 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 
 		buffer := c.GetUDPBuffer()
 		defer c.PutUDPBuffer(buffer)
-		reader := &conn.TimeoutReader{Conn: targetConn, Timeout: UDPReadTimeout}
 
 		for c.Ctx.Err() == nil {
-			x, err := reader.Read(buffer)
+			if UDPReadTimeout > 0 {
+				targetConn.SetReadDeadline(time.Now().Add(UDPReadTimeout))
+			}
+			x, err := targetConn.Read(buffer)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					c.Logger.Debug("UDP session abort: %v", err)
@@ -463,8 +462,7 @@ func (c *Common) TunnelUDPOnce(signal Signal) {
 				return
 			}
 
-			_, err = remoteConn.Write(buffer[:x])
-			if err != nil {
+			if err = writeUDPFrame(remoteConn, buffer[:x]); err != nil {
 				if err != io.EOF {
 					c.Logger.Error("TunnelUDPOnce: write to tunnel failed: %v", err)
 				}
