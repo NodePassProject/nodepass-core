@@ -264,7 +264,7 @@ Create a new NodePass instance with structured configuration.
 - `targets` (string): Multiple targets in format `host1:port1,host2:port2,...`
 - `password` (string): Connection password
 - `log` (string): Log level - `none`, `debug`, `info`, `warn`, `error`, `event`
-- `tls` (string): TLS mode - `0` (none), `1` (self-signed), `2` (custom, server only)
+- `tls` (string): TLS mode - `0` (none), `1` (self-signed), `2` (custom)
 - `crt` (string): Certificate file path (for tls=2)
 - `key` (string): Key file path (for tls=2)
 - `sni` (string): SNI hostname (client dual-end mode)

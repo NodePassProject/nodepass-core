@@ -116,9 +116,9 @@ API Key authentication is enabled by default, automatically generated and saved 
 ### URL Query Parameters
 
 - `log`: Log level (`none`, `debug`, `info`, `warn`, `error`, `event`)
-- `tls`: TLS encryption mode (`0`, `1`, `2`) - Server/Master mode only
-- `crt`/`key`: Certificate/key file paths (when `tls=2`)
-- `dns`: Custom DNS servers (comma-separated IP addresses, default: `1.1.1.1,8.8.8.8`) - Server/Client mode only
+- `tls`: TLS encryption mode (`0`, `1`, `2`) - For server/master: encrypts the data channel. For client single-end forwarding mode: enables TLS listener (reverse proxy/HTTPS termination)
+- `crt`/`key`: Certificate/key file paths (when `tls=2`; applicable to server, master, and client single-end forwarding mode)
+- `dns`: DNS cache TTL, e.g., `1h`, `30m`, `15s` (default: `5m`) - Server/Client mode only
 - `sni`: Server Name Indication, specifies hostname for TLS handshake (default: `none`) - Client dual-end handshake mode only
 - `lbs`: Load balancing strategy (`0`=round-robin, `1`=sticky failover, default: `0`) - Controls target address selection for multi-target configurations
 - `min`/`max`: Connection pool capacity (`min` set by client, `max` set by server and passed to client during handshake)

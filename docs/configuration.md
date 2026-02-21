@@ -21,7 +21,7 @@ nodepass server://0.0.0.0:10101/0.0.0.0:8080?log=debug
 
 ## TLS Encryption Modes
 
-For server and master modes, NodePass offers three TLS security levels for data channels:
+NodePass offers three TLS security levels that control encryption behavior. In **server and master modes**, TLS applies to the data channel between server and client. In **client single-end forwarding mode**, TLS turns the tunnel listener into a TLS-accepting endpoint, enabling the client to act as a standalone TLS-terminating reverse proxy.
 
 - **Mode 0**: No TLS encryption (plain TCP/UDP)
   - Fastest performance, no overhead
@@ -47,6 +47,50 @@ Example with TLS Mode 2 (custom certificate):
 nodepass "server://0.0.0.0:10101/0.0.0.0:8080?tls=2&crt=/path/to/cert.pem&key=/path/to/key.pem"
 ```
 
+## Client TLS Listener (Reverse Proxy)
+
+When a client instance runs in single-end forwarding mode (`mode=1`, or auto-detected), setting `tls=1` or `tls=2` upgrades the tunnel listener to a full TLS listener. This allows the client to terminate incoming TLS/HTTPS connections and forward the decrypted traffic to a plain backend service — much like Caddy or Nginx acting as a TLS reverse proxy.
+
+**How it works:**
+1. The client binds to `tunnel_addr` and wraps the TCP listener with TLS using the configured certificate
+2. Incoming clients (browsers, applications) connect with TLS/HTTPS
+3. NodePass terminates TLS, decrypts the traffic, and forwards it in plain form to `target_addr`
+4. Responses from the backend are encrypted and returned to the caller
+5. No NodePass server is involved — the client operates completely standalone
+
+**TLS Mode 1** (self-signed): Suitable for internal services, development environments, or scenarios where certificate validation is disabled on the caller side.
+
+**TLS Mode 2** (custom certificate): Used in production with certificates issued by a trusted CA (e.g., Let's Encrypt). The caller validates the certificate normally, making this fully transparent TLS termination.
+
+Example — HTTPS termination for a local HTTP backend:
+```bash
+# Self-signed TLS, listen on port 443, forward to plain HTTP on port 8080
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=1&mode=1"
+
+# Production TLS with custom certificate
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/etc/ssl/certs/fullchain.pem&key=/etc/ssl/private/key.pem"
+
+# TLS termination with rate limiting and connection slot control
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/etc/ssl/certs/fullchain.pem&key=/etc/ssl/private/key.pem&rate=500&slot=2000"
+```
+
+**Comparison with common reverse proxies:**
+
+| Feature | NodePass (client mode) | Nginx / Caddy |
+|---------|----------------------|---------------|
+| TLS termination | Yes (`tls=1` or `tls=2`) | Yes |
+| Plain backend forwarding | Yes | Yes |
+| Self-signed auto-generation | Yes (`tls=1`) | Yes (Caddy) |
+| Custom certificate | Yes (`tls=2`) | Yes |
+| Connection pool | Yes (built-in) | Yes |
+| Rate limiting | Yes (`rate`) | Yes (with modules) |
+| Zero dependencies | Yes (single binary) | No |
+
+**Important Notes:**
+- TLS parameters (`tls`, `crt`, `key`) are only effective in single-end forwarding mode. In dual-end handshake mode (`mode=2`), TLS configuration is delivered by the server and client-specified TLS settings are ignored.
+- The `crt` and `key` files must be readable by the NodePass process at startup.
+- If `tls=2` is specified without valid `crt` and `key` paths, NodePass will fail to start.
+
 ## Run Mode Control
 
 NodePass supports configurable run modes via the `mode` query parameter to control the behavior of both client and server instances. This provides flexibility in deployment scenarios where automatic mode detection may not be suitable.
@@ -64,6 +108,7 @@ For client instances, the `mode` parameter controls the connection strategy:
   - Binds to tunnel address locally and forwards traffic directly to target
   - Uses direct connection establishment for high performance
   - No handshake with server required
+  - Supports TLS listener (`tls=1` or `tls=2`) to act as a TLS-terminating reverse proxy
   
 - **Mode 2**: Force dual-end handshake mode
   - Always connects to remote server for tunnel establishment
@@ -72,8 +117,11 @@ For client instances, the `mode` parameter controls the connection strategy:
 
 Example:
 ```bash
-# Force client to operate in single-end forwarding mode
+# Force client to operate in single-end forwarding mode (plain TCP)
 nodepass "client://127.0.0.1:1080/target.example.com:8080?mode=1"
+
+# Force client to operate as a TLS reverse proxy (HTTPS termination)
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?mode=1&tls=2&crt=/path/to/cert.pem&key=/path/to/key.pem"
 
 # Force client to operate in dual-end handshake mode
 nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2"
@@ -810,9 +858,9 @@ NodePass allows flexible configuration via URL query parameters. The following t
 | Parameter | Description | Default | Accepted Values | server | client | master |
 |-----------|-------------|---------|-----------------|:------:|:------:|:------:|
 | `log` | Log level | `info` | `none`/`debug`/`info`/`warn`/`error`/`event` | O | O | O |
-| `tls` | TLS encryption mode | `0` | `0`/`1`/`2` | O | X | O |
-| `crt` | Custom certificate path | N/A | File path | O | X | O |
-| `key` | Custom key path | N/A | File path | O | X | O |
+| `tls` | TLS encryption mode | `0` | `0`/`1`/`2` | O | O | O |
+| `crt` | Custom certificate path | N/A | File path | O | O | O |
+| `key` | Custom key path | N/A | File path | O | O | O |
 | `dns` | DNS cache TTL | `5m` | `30s`/`5m`/`1h` etc. | O | O | X |
 | `sni` | Server Name Indication | `none` | Hostname | X | O | X |
 | `lbs` | Load balancing strategy | `0` | `0`/`1`/`2` | O | O | X |
@@ -833,7 +881,7 @@ NodePass allows flexible configuration via URL query parameters. The following t
 - X: Parameter is not applicable and should be ignored
 
 **Best Practices:**
-- For server/master modes, configure security-related parameters (`tls`, `crt`, `key`) to enhance data channel security.
+- For server/master modes, configure security-related parameters (`tls`, `crt`, `key`) to enhance data channel security. For client single-end forwarding mode, these parameters enable TLS termination on the listener (reverse proxy behavior).
 - For client/server dual-end handshake modes, adjust connection pool capacity (`min`, `max`) based on traffic and resource constraints for optimal performance.
 - Use run mode control (`mode`) when automatic detection doesn't match your deployment requirements or for consistent behavior across environments.
 - Configure rate limiting (`rate`) to control bandwidth usage and prevent network congestion in shared environments.

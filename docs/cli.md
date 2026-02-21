@@ -350,6 +350,26 @@ nodepass client [flags]
   - Useful for accessing servers behind SNI-based routing
   - Example: `--sni backend.example.com`
 
+- `--tls <mode>`
+  - TLS mode for the tunnel listener in single-end forwarding mode: `0`, `1`, or `2`
+  - `0`: No TLS (plain TCP listener, default)
+  - `1`: Self-signed certificate (automatically generated TLS listener)
+  - `2`: Custom certificate (requires --crt and --key)
+  - When set to `1` or `2`, the client acts as a TLS-terminating reverse proxy
+  - Only effective in single-end forwarding mode (mode=1 or auto-detected); ignored in mode=2
+  - Default: `0`
+  - Example: `--tls 1`
+
+- `--crt <path>`
+  - Path to TLS certificate file (PEM format)
+  - Required when `--tls 2`
+  - Example: `--crt /etc/ssl/certs/fullchain.pem`
+
+- `--key <path>`
+  - Path to TLS private key file (PEM format)
+  - Required when `--tls 2`
+  - Example: `--key /etc/ssl/private/key.pem`
+
 #### Connection Pool Configuration
 
 - `--min <number>`
@@ -451,6 +471,12 @@ nodepass client [flags]
 # Local proxy with high-performance connection pooling
 nodepass "client://127.0.0.1:1080/target.example.com:8080?mode=1&min=256"
 
+# TLS reverse proxy - HTTPS termination with self-signed certificate
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=1&mode=1"
+
+# TLS reverse proxy - HTTPS termination with custom domain certificate
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/etc/ssl/certs/fullchain.pem&key=/etc/ssl/private/key.pem"
+
 # Connect to remote server with custom DNS cache
 nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2&dns=30s"
 
@@ -472,6 +498,26 @@ nodepass client \
   --target-port 8080 \
   --mode 1 \
   --min 256
+
+# TLS reverse proxy with self-signed certificate (HTTPS termination on port 443)
+nodepass client \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 443 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --tls 1 \
+  --mode 1
+
+# TLS reverse proxy with custom domain certificate
+nodepass client \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 443 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --tls 2 \
+  --crt /etc/ssl/certs/fullchain.pem \
+  --key /etc/ssl/private/key.pem \
+  --mode 1
 
 # Connect to remote server with custom DNS cache
 nodepass client \

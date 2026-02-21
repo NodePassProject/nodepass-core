@@ -244,22 +244,28 @@ nodepass server \
 
 ### Client Mode
 
-Client mode connects to a NodePass server and supports bidirectional data flow forwarding.
+Client mode connects to a NodePass server and supports bidirectional data flow forwarding. When operating in single-end forwarding mode, it can also function as a standalone TLS-terminating reverse proxy.
 
 ```bash
-nodepass "client://<tunnel_addr>/<target_addr>?log=<level>&dns=<duration>&min=<min_pool>&mode=<run_mode>&dial=<source_ip>&read=<timeout>&rate=<mbps>&slot=<limit>&proxy=<mode>&notcp=<0|1>&noudp=<0|1>"
+nodepass "client://<tunnel_addr>/<target_addr>?log=<level>&tls=<mode>&crt=<cert_file>&key=<key_file>&dns=<duration>&min=<min_pool>&mode=<run_mode>&dial=<source_ip>&read=<timeout>&rate=<mbps>&slot=<limit>&proxy=<mode>&notcp=<0|1>&noudp=<0|1>"
 ```
 
 #### Parameters
 
-- `tunnel_addr`: Address of the NodePass server's tunnel endpoint to connect to (e.g., 10.1.0.1:10101)
+- `tunnel_addr`: Address of the NodePass server's tunnel endpoint to connect to (e.g., 10.1.0.1:10101), or local bind address in single-end forwarding mode (e.g., 0.0.0.0:443)
 - `target_addr`: The destination address for business data with bidirectional flow support (e.g., 127.0.0.1:8080)
 - `log`: Log level (debug, info, warn, error, event)
+- `tls`: TLS encryption mode for the tunnel listener (single-end forwarding mode only) (0, 1, 2)
+  - `0`: No TLS (plain TCP listener, default)
+  - `1`: Self-signed certificate (automatically generated TLS listener)
+  - `2`: Custom certificate (requires `crt` and `key` parameters)
+- `crt`: Path to certificate file (required when `tls=2`)
+- `key`: Path to private key file (required when `tls=2`)
 - `dns`: DNS cache TTL duration (default: 5m, supports time units like `1h`, `30m`, `15s`, etc.)
 - `min`: Minimum connection pool capacity (default: 64)
 - `mode`: Run mode control for client behavior
   - `0`: Automatic detection (default) - attempts local binding first, falls back to handshake mode
-  - `1`: Force single-end forwarding mode - local proxy with connection pooling
+  - `1`: Force single-end forwarding mode - local proxy/reverse proxy with connection pooling
   - `2`: Force dual-end handshake mode - requires server coordination
 - `dial`: Source IP address for outbound connections to target (default: `auto` for system-selected IP)
 - `read`: Data read timeout duration (default: 0, supports time units like 30s, 5m, 1h, etc.)
@@ -269,7 +275,7 @@ nodepass "client://<tunnel_addr>/<target_addr>?log=<level>&dns=<duration>&min=<m
 - `notcp`: TCP support control (default: `0` enabled, `1` disabled)
 - `noudp`: UDP support control (default: `0` enabled, `1` disabled)
 
-**Note**: Connection pool type configuration is automatically received from the server during handshake. Clients do not need to specify the `type` parameter.
+**Note**: Connection pool type configuration is automatically received from the server during handshake. Clients do not need to specify the `type` parameter. The `tls`, `crt`, and `key` parameters apply only to single-end forwarding mode (mode=1 or auto-detected); they are ignored in dual-end handshake mode (mode=2).
 
 #### How Client Mode Works
 
@@ -282,10 +288,11 @@ Client mode supports automatic mode detection or forced mode selection through t
 
 **Mode 1: Single-End Forwarding Mode**
 1. Listens for TCP and UDP connections on the local tunnel address
-2. Uses connection pooling technology to pre-establish TCP connections to target address, eliminating connection latency
-3. Directly forwards received traffic to the target address with high performance
-4. No handshake with server required, enables point-to-point direct forwarding
-5. Suitable for local proxy and simple forwarding scenarios
+2. If `tls=1` or `tls=2` is configured, wraps the listener with TLS — the client becomes a **TLS-terminating reverse proxy** (similar to Caddy or Nginx), accepting HTTPS/TLS connections and forwarding decrypted plain traffic to the target
+3. Uses connection pooling technology to pre-establish TCP connections to target address, eliminating connection latency
+4. Directly forwards received traffic to the target address with high performance
+5. No handshake with server required, enables point-to-point direct forwarding
+6. Suitable for local proxy, TLS termination, and simple forwarding scenarios
 
 **Mode 2: Dual-End Handshake Mode**
 - **Client Receives Traffic** (when server sends traffic)
@@ -309,6 +316,12 @@ nodepass "client://127.0.0.1:1080/target.example.com:8080?log=debug"
 
 # Force single-end forwarding mode - High performance local proxy
 nodepass "client://127.0.0.1:1080/target.example.com:8080?mode=1&log=debug"
+
+# TLS reverse proxy - Accept HTTPS on port 443, forward plain HTTP to backend (self-signed cert)
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=1&mode=1"
+
+# TLS reverse proxy - Accept HTTPS on port 443 with custom domain certificate
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/path/to/cert.pem&key=/path/to/key.pem"
 
 # Force dual-end handshake mode - Connect to NodePass server
 nodepass "client://server.example.com:10101/127.0.0.1:8080?mode=2"
@@ -354,6 +367,26 @@ nodepass client \
   --target-port 8080 \
   --mode 1 \
   --log debug
+
+# TLS reverse proxy with self-signed certificate (HTTPS termination on port 443)
+nodepass client \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 443 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --tls 1 \
+  --mode 1
+
+# TLS reverse proxy with custom domain certificate
+nodepass client \
+  --tunnel-addr 0.0.0.0 \
+  --tunnel-port 443 \
+  --target-addr 127.0.0.1 \
+  --target-port 8080 \
+  --tls 2 \
+  --crt /path/to/cert.pem \
+  --key /path/to/key.pem \
+  --mode 1
 
 # Force dual-end handshake mode
 nodepass client \
@@ -566,9 +599,10 @@ NodePass supports flexible bidirectional data flow configuration:
 
 ### Client Single-End Forwarding Mode
 - **Client**: Listens on local tunnel address, uses connection pooling technology to directly forward to target address
+- **TLS Listener**: When `tls=1` or `tls=2` is set, the listener accepts TLS-encrypted connections and forwards decrypted traffic to the plain backend — functioning as a TLS-terminating reverse proxy similar to Caddy or Nginx
 - **Connection Pool Optimization**: Pre-establishes TCP connections, eliminates connection latency, provides high-performance forwarding
 - **No Server Required**: Operates independently without server handshake
-- **Use Case**: Local proxy, simple port forwarding, testing environments, high-performance forwarding
+- **Use Case**: Local proxy, TLS termination, HTTPS reverse proxy, simple port forwarding, testing environments, high-performance forwarding
 
 ### Server Receives Mode
 - **Server**: Listens for incoming connections on target_addr, forwards through tunnel to client

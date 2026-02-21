@@ -97,9 +97,86 @@ These configurations:
 - **Client mode=2**: Forces dual-end handshake mode for scenarios requiring server coordination
 - Use mode control when automatic detection doesn't match your deployment requirements
 
+## TLS Reverse Proxy (HTTPS Termination)
+
+NodePass client in single-end forwarding mode can act as a standalone TLS-terminating reverse proxy, accepting encrypted HTTPS connections from callers and forwarding plain HTTP traffic to backend services — similar to Caddy or Nginx.
+
+### Example 7: HTTPS Termination with Self-Signed Certificate
+
+Quickly expose a plain HTTP backend over HTTPS without a trusted CA:
+
+```bash
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=1&mode=1"
+```
+
+This configuration:
+- Listens on port 443 for incoming TLS/HTTPS connections
+- Automatically generates a self-signed TLS certificate at startup
+- Terminates TLS and forwards decrypted traffic to the local HTTP backend on port 8080
+- No NodePass server required — operates completely standalone
+- Suitable for development, testing, or internal services where certificate validation is relaxed
+
+### Example 8: HTTPS Termination with Custom Domain Certificate
+
+Production-grade HTTPS reverse proxy using a certificate issued by a trusted CA:
+
+```bash
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/etc/ssl/certs/fullchain.pem&key=/etc/ssl/private/key.pem"
+```
+
+This setup:
+- Listens on port 443 and presents the provided domain certificate to callers
+- Browsers and API clients validate the certificate normally — fully transparent to the application
+- Forwards decrypted HTTPS traffic to the plain HTTP backend
+- Supports rate limiting and connection slot control alongside TLS termination
+- Ideal for lightweight single-binary deployments replacing Nginx or Caddy
+
+**With additional controls:**
+
+```bash
+# Production HTTPS proxy with bandwidth and connection limits
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/etc/ssl/certs/fullchain.pem&key=/etc/ssl/private/key.pem&rate=500&slot=2000&log=warn"
+```
+
+### Example 9: Multiple HTTPS Backends on Different Ports
+
+Run several independent TLS reverse proxy instances on the same host:
+
+```bash
+# HTTPS for the main web application (port 443)
+nodepass "client://0.0.0.0:443/127.0.0.1:8080?tls=2&mode=1&crt=/etc/ssl/app/fullchain.pem&key=/etc/ssl/app/key.pem"
+
+# HTTPS for the admin panel (port 8443)
+nodepass "client://0.0.0.0:8443/127.0.0.1:9090?tls=2&mode=1&crt=/etc/ssl/admin/fullchain.pem&key=/etc/ssl/admin/key.pem"
+
+# HTTPS for an internal API (port 4443)
+nodepass "client://0.0.0.0:4443/127.0.0.1:3000?tls=2&mode=1&crt=/etc/ssl/api/fullchain.pem&key=/etc/ssl/api/key.pem"
+```
+
+This setup:
+- Each NodePass client instance handles one port independently
+- Different certificates can be used per port/service
+- Plain backend services (app, admin, API) remain isolated from TLS handling
+- Single binary, no additional reverse proxy software required
+
+### Example 10: TLS Reverse Proxy with Load Balancing
+
+Terminate TLS and distribute plain traffic across multiple backend instances:
+
+```bash
+# Accept HTTPS and round-robin across three backend replicas
+nodepass "client://0.0.0.0:443/10.0.0.1:8080,10.0.0.2:8080,10.0.0.3:8080?tls=2&mode=1&lbs=1&crt=/etc/ssl/certs/fullchain.pem&key=/etc/ssl/private/key.pem"
+```
+
+This configuration:
+- Terminates TLS at the NodePass listener
+- Distributes decrypted connections to three backend replicas using round-robin load balancing
+- All backends receive plain TCP traffic — no TLS configuration needed on the backend side
+- Combines TLS termination and load balancing in a single lightweight process
+
 ## Database Access Through Firewall
 
-### Example 7: Database Tunneling
+### Example 11: Database Tunneling
 
 Enable secure access to a database server behind a firewall:
 
@@ -119,7 +196,7 @@ This configuration:
 
 ## Secure Microservice Communication
 
-### Example 8: Service-to-Service Communication
+### Example 12: Service-to-Service Communication
 
 Enable secure communication between microservices:
 
@@ -139,7 +216,7 @@ This setup:
 
 ## SNI Configuration for TLS Connections
 
-### Example 9: Custom SNI for SNI-Based Routing
+### Example 13: Custom SNI for SNI-Based Routing
 
 Connect to servers behind SNI-aware load balancers or reverse proxies:
 
@@ -157,7 +234,7 @@ This configuration:
 - Load balancer or reverse proxy routes traffic based on SNI value
 - Enables access to multiple services hosted on the same IP address
 
-### Example 9a: SNI for Certificate Validation
+### Example 13a: SNI for Certificate Validation
 
 Connect using IP address while providing correct SNI for certificate validation:
 
@@ -174,7 +251,7 @@ This setup:
 
 ## Protocol Blocking and Traffic Filtering
 
-### Example 10: Block Proxy Protocols
+### Example 14: Block Proxy Protocols
 
 Prevent SOCKS and HTTP proxy usage through your tunnel:
 
@@ -192,7 +269,7 @@ This configuration:
 - Allows only application-specific protocols through the tunnel
 - Useful for preventing proxy abuse on application tunnels
 
-### Example 11: Block TLS-in-TLS Scenarios
+### Example 15: Block TLS-in-TLS Scenarios
 
 Prevent nested TLS encryption when outer layer already provides security:
 
@@ -210,7 +287,7 @@ This setup:
 - Prevents unnecessary double encryption overhead
 - Helps identify misconfigurations where applications try to add redundant TLS
 
-### Example 12: Comprehensive Security Policy
+### Example 16: Comprehensive Security Policy
 
 Enforce strict security policy allowing only application traffic:
 
@@ -230,7 +307,7 @@ This configuration:
 - Limits concurrent connections to 500 for resource control
 - Only logs warnings and errors to reduce noise
 
-### Example 13: Selective Protocol Blocking for Development
+### Example 17: Selective Protocol Blocking for Development
 
 Allow HTTP traffic while blocking proxies in development environment:
 
@@ -250,7 +327,7 @@ This setup:
 
 ## Bandwidth Rate Limiting
 
-### Example 14: File Transfer Server with Rate Limit
+### Example 18: File Transfer Server with Rate Limit
 
 Control bandwidth usage for file transfer services:
 
@@ -268,7 +345,7 @@ This configuration:
 - Allows file transfers while preserving bandwidth for other services
 - Uses TLS encryption for secure file transfer
 
-### Example 15: IoT Sensor Data Collection with Conservative Limits
+### Example 19: IoT Sensor Data Collection with Conservative Limits
 
 For IoT devices with limited bandwidth or metered connections:
 
@@ -286,7 +363,7 @@ This setup:
 - Minimal logging (warn/error) to reduce resource usage on IoT devices
 - Efficient for MQTT or other IoT protocols
 
-### Example 16: Development Environment Rate Control
+### Example 20: Development Environment Rate Control
 
 Testing applications under bandwidth constraints:
 
@@ -305,7 +382,7 @@ This configuration:
 
 ## IoT Device Management
 
-### Example 17: IoT Gateway
+### Example 21: IoT Gateway
 
 Create a central access point for IoT devices:
 
@@ -326,7 +403,7 @@ This configuration:
 
 ## Multi-Homed Systems and Source IP Control
 
-### Example 18: Specific Network Interface Selection
+### Example 22: Specific Network Interface Selection
 
 Control which network interface is used for outbound connections on multi-homed systems:
 
@@ -346,7 +423,7 @@ This configuration:
 - Supports both IPv4 and IPv6 addresses
 - Connections fail if the specified IP cannot be bound or used
 
-### Example 19: Network Segmentation and VLAN Routing
+### Example 23: Network Segmentation and VLAN Routing
 
 Direct traffic through specific network segments or VLANs:
 
@@ -378,7 +455,7 @@ This setup:
 
 ## DNS Cache TTL Configuration
 
-### Example 20: Stable Corporate Network
+### Example 24: Stable Corporate Network
 
 Use longer TTL for stable internal services:
 
@@ -396,7 +473,7 @@ This configuration:
 - Improves connection performance by minimizing DNS lookups
 - Suitable for production environments with stable DNS
 
-### Example 21: Dynamic DNS Environments
+### Example 25: Dynamic DNS Environments
 
 Use shorter TTL for frequently changing DNS records:
 
@@ -414,7 +491,7 @@ This setup:
 - Ensures connections use current DNS records
 - Ideal for cloud environments with frequent IP changes
 
-### Example 22: Development and Testing
+### Example 26: Development and Testing
 
 Disable caching for development environments:
 
@@ -432,7 +509,7 @@ This configuration:
 - Useful during development when DNS records change frequently
 - Helps identify DNS-related issues during testing
 
-### Example 23: Mixed Environment with Custom TTL
+### Example 27: Mixed Environment with Custom TTL
 
 Balance performance and freshness with moderate TTL:
 
@@ -462,7 +539,7 @@ This setup:
 
 ## High Availability and Load Balancing
 
-### Example 24: Multi-Backend Server Load Balancing
+### Example 28: Multi-Backend Server Load Balancing
 
 Use target address groups for even traffic distribution and automatic failover:
 
@@ -480,7 +557,7 @@ This configuration:
 - Automatically resumes sending traffic to recovered servers
 - Uses TLS encryption to secure the tunnel
 
-### Example 23a: Load Balancing with Different Strategies
+### Example 28a: Load Balancing with Different Strategies
 
 NodePass supports three load balancing strategies for multiple targets:
 
@@ -503,7 +580,7 @@ Choose the appropriate strategy based on your needs:
 - **lbs=1 (Optimal-latency)**: Best for geographically distributed servers or mixed capacity environment
 - **lbs=2 (Primary-backup)**: Best for cost optimization (keep backup cold) or when you have a preferred primary server
 
-### Example 25: Database Primary-Replica Failover
+### Example 29: Database Primary-Replica Failover
 
 Configure primary and replica database instances for high availability access:
 
@@ -518,7 +595,7 @@ This setup:
 - Application requires no modification for transparent failover
 - Logs only warnings and errors to reduce output
 
-### Example 26: API Gateway Backend Pool
+### Example 30: API Gateway Backend Pool
 
 Configure multiple backend service instances for an API gateway:
 
@@ -536,7 +613,7 @@ This configuration:
 - Client limits bandwidth to 100 Mbps with maximum 2000 concurrent connections
 - Single instance failure doesn't affect overall service availability
 
-### Example 27: Geo-Distributed Services
+### Example 31: Geo-Distributed Services
 
 Configure multi-region service nodes to optimize network latency:
 
@@ -560,7 +637,7 @@ This setup:
 
 ## PROXY Protocol Integration
 
-### Example 28: Load Balancer Integration with PROXY Protocol
+### Example 32: Load Balancer Integration with PROXY Protocol
 
 Enable PROXY protocol support for integration with load balancers and reverse proxies:
 
@@ -579,7 +656,7 @@ This configuration:
 - Compatible with HAProxy, Nginx, and other PROXY protocol aware services
 - Useful for maintaining accurate access logs and IP-based access controls
 
-### Example 29: Reverse Proxy Support for Web Applications
+### Example 33: Reverse Proxy Support for Web Applications
 
 Enable web applications behind NodePass to receive original client information:
 
@@ -603,7 +680,7 @@ This setup:
 - Supports compliance requirements for connection auditing
 - Works with web servers that support PROXY protocol (Nginx, HAProxy, etc.)
 
-### Example 30: Database Access with Client IP Preservation
+### Example 34: Database Access with Client IP Preservation
 
 Maintain client IP information for database access logging and security:
 
@@ -630,7 +707,7 @@ Benefits:
 
 ## Container Deployment
 
-### Example 31: Containerized NodePass
+### Example 35: Containerized NodePass
 
 Deploy NodePass in a Docker environment:
 
@@ -665,7 +742,7 @@ This configuration:
 
 ## Master API Management
 
-### Example 32: Centralized Management
+### Example 36: Centralized Management
 
 Set up a central controller for multiple NodePass instances:
 
@@ -702,7 +779,7 @@ This setup:
 - Offers a RESTful API for automation and integration
 - Includes a built-in Swagger UI at http://localhost:9090/api/v1/docs
 
-### Example 33: Custom API Prefix
+### Example 37: Custom API Prefix
 
 Use a custom API prefix for the master mode:
 
@@ -721,7 +798,7 @@ This allows:
 - Custom URL paths for security or organizational purposes
 - Swagger UI access at http://localhost:9090/admin/v1/docs
 
-### Example 34: Real-time Connection and Traffic Monitoring
+### Example 38: Real-time Connection and Traffic Monitoring
 
 Monitor instance connection counts and traffic statistics through the master API:
 
@@ -761,7 +838,7 @@ This monitoring setup provides:
 
 ## Connection Pool Types
 
-### Example 35: QUIC-based Tunnel with Stream Multiplexing
+### Example 39: QUIC-based Tunnel with Stream Multiplexing
 
 Use QUIC protocol for connection pooling with improved performance in high-latency networks:
 
@@ -781,7 +858,7 @@ This configuration:
 - Improved connection establishment with 0-RTT support
 - Client automatically receives pool type configuration from server during handshake
 
-### Example 36: QUIC Pool with Custom TLS Certificate
+### Example 40: QUIC Pool with Custom TLS Certificate
 
 Deploy QUIC tunnel with verified certificates for production:
 
@@ -800,7 +877,7 @@ This setup:
 - Full certificate validation on client side
 - Pool type configuration automatically delivered from server
 
-### Example 37: WebSocket Pool for Proxy Traversal
+### Example 41: WebSocket Pool for Proxy Traversal
 
 Use WebSocket pool behind enterprise firewalls:
 
@@ -822,7 +899,7 @@ This configuration:
 - Client automatically adopts server's pool type configuration
 - **Note**: WebSocket pool does not support unencrypted mode (tls=0)
 
-### Example 38: HTTP/2 Pool for High-Concurrency Environments
+### Example 42: HTTP/2 Pool for High-Concurrency Environments
 
 Use HTTP/2 pool for efficient multiplexed streams with protocol optimization:
 
@@ -845,7 +922,7 @@ This configuration:
 - Client automatically adopts server's pool type configuration
 - Ideal for high-concurrency scenarios benefiting from stream multiplexing
 
-### Example 39: QUIC Pool for Mobile/High-Latency Networks
+### Example 43: QUIC Pool for Mobile/High-Latency Networks
 
 Optimize for mobile networks or satellite connections:
 
@@ -865,7 +942,7 @@ This configuration:
 - 0-RTT reconnection for faster recovery after network changes
 - Client automatically adopts pool type from server
 
-### Example 40: Pool Type Performance Comparison
+### Example 44: Pool Type Performance Comparison
 
 Side-by-side comparison of TCP, QUIC, WebSocket, and HTTP/2 pools:
 
@@ -913,7 +990,7 @@ nodepass "client://server.example.com:10104/127.0.0.1:8083?mode=2&min=128&log=ev
 - Works with HTTP/2-aware infrastructure
 - Ideal for HTTP/HTTPS-only policy environments
 
-### Example 41: QUIC Pool for Real-Time Applications
+### Example 45: QUIC Pool for Real-Time Applications
 
 Configure QUIC tunnel for gaming, VoIP, or video streaming:
 

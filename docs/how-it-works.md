@@ -1,680 +1,1019 @@
 # How NodePass Works
 
-This page explains the internal architecture and data flow mechanisms of NodePass, providing insights into how the different components interact to create efficient and secure tunnels.
+This page describes the internal architecture and data flow of NodePass as implemented in the source code, with architecture graphs illustrating how the components interact.
 
-## Architecture Overview
+---
 
-NodePass creates a network architecture with separate channels for control and data:
+## Table of Contents
 
-1. **Control Channel (Tunnel)**:
-   - Unencrypted TCP connection between client and server
-   - Used exclusively for signaling and coordination
-   - Maintains persistent connection for the lifetime of the tunnel
+- [Core Architecture](#core-architecture)
+- [Startup and Handshake](#startup-and-handshake)
+- [Operating Modes](#operating-modes)
+  - [Single-End Forwarding (Mode 1)](#single-end-forwarding-mode-1)
+  - [Dual-End Pooled (Mode 2)](#dual-end-pooled-mode-2)
+  - [TLS Termination](#tls-termination)
+- [Connection Pool](#connection-pool)
+  - [Pool Types](#pool-types)
+  - [Pool Lifecycle](#pool-lifecycle)
+  - [Auto-Scaling](#auto-scaling)
+- [Signal Protocol](#signal-protocol)
+- [TLS Modes](#tls-modes)
+- [UDP Handling](#udp-handling)
+- [Health and Load Management](#health-and-load-management)
+- [Master Mode](#master-mode)
 
-2. **Data Channel (Target)**:
-   - Configurable TLS encryption options:
-     - **Mode 0**: Unencrypted data transfer (fastest, least secure)
-     - **Mode 1**: Self-signed certificate encryption (good security, no verification)
-     - **Mode 2**: Verified certificate encryption (highest security, requires valid certificates)
-   - Created on-demand for each connection or datagram
-   - Used for actual application data transfer
+---
 
-3. **Server Mode Operation**:
-   - Listens for control connections on the tunnel endpoint
-   - When traffic arrives at the target endpoint, signals the client via the control channel
-   - Establishes data channels with the specified TLS mode when needed
-   - Supports bidirectional data flow: connections can be initiated from either server or client side
+## Core Architecture
 
-4. **Client Mode Operation**:
-   - Connects to the server's control channel
-   - **Handshake Phase**: After server validates the tunnel key, it delivers configuration to client:
-     - Data flow direction mode (determines whether client receives or sends traffic)
-     - Maximum connection pool capacity (centrally managed and allocated by server)
-     - TLS security level (ensures client uses correct encryption mode)
-   - Listens for signals indicating incoming connections
-   - Creates data connections using the TLS security level specified by the server
-   - Forwards data between the secure channel and local target
-   - Supports bidirectional data flow: data flow direction is automatically selected based on target address
+NodePass splits all traffic into two independent channels. The control channel carries only coordination signals; the data channel carries application bytes. This separation means the data path can be fully encrypted and optimised independently of the control path.
 
-5. **Client Single-End Forwarding Mode**:
-   - Automatically enabled when tunnel address is a local address (e.g., 127.0.0.1)
-   - Client directly listens on local port without server control channel coordination
-   - Uses direct connection establishment for both TCP and UDP protocols
-   - Suitable for pure local forwarding scenarios, reducing network overhead and latency
-   - Supports high-performance single-end forwarding with optimized connection handling
+```
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                        NodePass Architecture                        │
+  │                                                                     │
+  │   ┌──────────┐   Control Channel (TCP + XOR/Base64 JSON signals)    │
+  │   │          │ ─────────────────────────────────────────────────►   │
+  │   │  Server  │                                                      │
+  │   │          │ ◄─────────────────────────────────────────────────   │
+  │   └────┬─────┘   Data Channel (Pool — TCP / QUIC / WS / H2 + TLS)   │
+  │        │                                         ▲                  │
+  │        │ listens / dials                         │ dials / listens  │
+  │        ▼                                         │                  │
+  │   ┌──────────┐                            ┌──────────┐              │
+  │   │  Target  │                            │  Target  │              │
+  │   │ (remote) │                            │ (local)  │              │
+  │   └──────────┘                            └──────────┘              │
+  │    Server Side                             Client Side              │
+  └─────────────────────────────────────────────────────────────────────┘
+```
 
-5. **Protocol Support**:
-   - **TCP**: Full bidirectional streaming with persistent connections, optimized for direct connection establishment in client single-end forwarding mode
-   - **UDP**: Datagram forwarding with configurable buffer sizes and timeouts
+Three top-level modes share this foundation:
 
-## Data Transmission Flow
+```
+  nodepass <url>
+       │
+       ├── server://   Accepts clients. Manages pool. Signals when traffic arrives.
+       │
+       ├── client://   Connects to server or listens locally.
+       │               Dials targets on signal.
+       │
+       └── master://   REST API. Spawns and supervises server/client instances.
+```
 
-NodePass establishes a bidirectional data flow through its tunnel architecture, supporting both TCP and UDP protocols. The system supports three data flow modes:
+### Channel Responsibilities
 
-### Data Flow Mode Explanation
-- **Server Receives Mode**: Server listens on target address, client listens locally, data flows from target address to client local
-- **Server Sends Mode**: Server connects to remote target address, client listens locally, data flows from client local to remote target
-- **Client Single-End Forwarding Mode**: Client directly listens locally and forwards to target address without server coordination, using direct connection establishment for optimized forwarding
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  Control Channel                  Data Channel                   │
+  │  ─────────────                    ────────────                   │
+  │  • Authentication (HMAC token)    • Application bytes (TCP/UDP)  │
+  │  • Config delivery (handshake)    • Configurable TLS (0 / 1 / 2) │
+  │  • Pool connection IDs            • One connection per signal    │
+  │  • Health ping / pong             • Managed by pool library      │
+  │  • Pool flush requests            • Separate from control path   │
+  │  • TLS fingerprint exchange                                      │
+  │                                                                  │
+  │  Encoding: JSON → XOR(key) → Base64 → \n                         │
+  │  Transport: plain TCP (lightweight by design — no app data here) │
+  └──────────────────────────────────────────────────────────────────┘
+```
 
-The data flow mode is automatically determined based on tunnel address and target address:
-- If tunnel address is a local address (localhost, 127.0.0.1, etc.), enables Client Single-End Forwarding Mode
-- If target address is a local address, uses Server Receives Mode
-- If target address is a remote address, uses Server Sends Mode
+---
 
-### Server-Side Flow (Server Receives Mode)
-1. **Connection Initiation**:
-   ```
-   [Target Client] → [Target Listener] → [Server: Target Connection Created]
-   ```
-   - For TCP: Client establishes persistent connection to target listener
-   - For UDP: Server receives datagrams on UDP socket bound to target address
+## Startup and Handshake
 
-2. **Signal Generation**:
-   ```
-   [Server] → [Generate Unique Connection ID] → [Signal Client via Unencrypted TCP Tunnel]
-   ```
-   - For TCP: Generates a `{"action":"tcp","remote":"target_addr","id":"connection_id"}` signal
-   - For UDP: Generates a `{"action":"udp","remote":"client_addr","id":"connection_id"}` signal
+Before any pool connections are made, a temporary HTTPS server negotiates the tunnel configuration. The server is torn down immediately after the single exchange completes.
 
-3. **Connection Preparation**:
-   ```
-   [Server] → [Create Remote Connection in Pool with Configured TLS Mode] → [Wait for Client Connection]
-   ```
-   - Both protocols use the same connection pool mechanism with unique connection IDs
-   - TLS configuration applied based on the specified mode (0, 1, or 2)
+```
+  Client                                          Server
+    │                                               │
+    │   1. Server binds TunnelListener (TCP)        │
+    │      Spins up ephemeral http.Server + TLS     │
+    │                                               │
+    │──── GET / ─────────────────────────────────►  │
+    │     Authorization: Bearer <HMAC token>        │
+    │                                               │
+    │                    2. Verify HMAC token       │
+    │                    3. Resolve DataFlow        │
+    │                    4. Prepare config payload  │
+    │                                               │
+    │◄─── 200 OK ─────────────────────────────────  │
+    │     { flow, max, tls, type }                  │
+    │                                               │
+    │   5. Client stores config                     │
+    │   6. Server closes ephemeral http.Server      │
+    │   7. Server re-binds TunnelListener (fresh)   │
+    │                                               │
+    │──── Pool connections established ───────────► │
+    │     (TCP / QUIC / WebSocket / HTTP2)          │
+    │                                               │
+    │   (tls=1 only)                                │
+    │◄─── verify signal: server fingerprint ──────  │
+    │──── verify signal: client fingerprint ──────► │
+    │   Fingerprints compared — mismatch = abort    │
+    │                                               │
+    │──── Control channel active ─────────────────► │
+```
 
-4. **Data Exchange**:
-   ```
-   [Target Connection] ⟷ [Exchange/Transfer] ⟷ [Remote Connection]
-   ```
-   - For TCP: Uses `conn.DataExchange()` for continuous bidirectional data streaming
-   - For UDP: Individual datagrams are forwarded with configurable buffer sizes
+**HMAC token derivation:**
 
-### Client-Side Flow
-1. **Signal Reception**:
-   ```
-   [Client] → [Read Signal from TCP Tunnel] → [Parse Connection ID]
-   ```
-   - Client differentiates between signal types based on the action field
+```
+  TunnelKey = URL password  (or hex(FNV32a(port)) if no password given)
 
-2. **Connection Establishment**:
-   ```
-   [Client] → [Retrieve Connection from Pool] → [Connect to Remote Endpoint]
-   ```
-   - Connection management is protocol-agnostic at this stage
+  AuthToken = hex( HMAC-SHA256( key=TunnelKey, data="" ) )
+```
 
-3. **Local Connection**:
-   ```
-   [Client] → [Connect to Local Target] → [Establish Local Connection]
-   ```
-   - For TCP: Establishes persistent TCP connection to local target
-   - For UDP: Creates UDP socket for datagram exchange with local target
+The same key is used for XOR-encoding all subsequent control signals, providing a consistent identity throughout the session.
 
-4. **Data Exchange**:
-   ```
-   [Remote Connection] ⟷ [Exchange/Transfer] ⟷ [Local Target Connection]
-   ```
-   - For TCP: Uses `conn.DataExchange()` for continuous bidirectional data streaming
-   - For UDP: Reads single datagram, forwards it, waits for response with timeout, then returns response
+---
 
-### Client Single-End Forwarding Flow
-1. **Mode Detection**:
-   ```
-   [Client] → [Detect Tunnel Address as Local Address] → [Enable Single-End Forwarding Mode]
-   ```
-   - Automatically detects if tunnel address is localhost, 127.0.0.1, or other local addresses
-   - Enables single-end forwarding mode, skipping server control channel establishment
+## Operating Modes
 
-2. **Local Listening**:
-   ```
-   [Client] → [Start Listener on Tunnel Port] → [Wait for Local Connections]
-   ```
-   - Directly starts TCP or UDP listener on specified tunnel port
-   - No need to connect to remote server, achieving zero-latency startup
+### Mode Detection
 
-3. **Direct Connection Establishment**:
-   ```
-   [Client] → [Create Direct Connection to Target Address] → [Establish Target Connection]
-   ```
-   - For TCP: Directly establishes TCP connection to target address for each tunnel connection
-   - For UDP: Creates UDP socket for datagram exchange with target address
-   - Eliminates connection pool overhead, providing simpler and more direct forwarding path
+```
+  Client.Start()
+       │
+       ├── RunMode == "1" ──► InitTunnelListener → SingleStart
+       │
+       ├── RunMode == "2" ──► CommonStart (connects to server)
+       │
+       └── RunMode == "0" (auto)
+               │
+               ├── InitTunnelListener OK? ──► RunMode = "1" → SingleStart
+               │
+               └── Fails (port taken / remote addr) ──► RunMode = "2" → CommonStart
+```
 
-4. **Optimized Forwarding**:
-   ```
-   [Local Connection] → [Direct Target Connection] → [Data Exchange] → [Connection Cleanup]
-   ```
-   - For TCP: Direct connection establishment followed by efficient data exchange
-   - For UDP: Direct datagram forwarding to target address with minimal latency
-   - Simplified data path ensuring reliable and efficient forwarding
+---
 
-### Specific protocol characteristics
-- **TCP Exchange**: 
-  - Persistent connections for full-duplex communication
-  - Continuous data streaming until connection termination
-  - Automatic error handling with reconnection capability
-  - **Client Single-End Forwarding Optimization**: Direct connection establishment for each tunnel connection, ensuring reliable and efficient forwarding
+### Single-End Forwarding (Mode 1)
 
-- **UDP Exchange**:
-  - One-shot datagram forwarding with configurable buffer sizes (`UDP_DATA_BUF_SIZE`)
-  - Read timeout control for response waiting (`read` parameter or default 0)
-  - Optimized for low-latency, stateless communication
-  - **Client Single-End Forwarding Optimization**: Direct forwarding mechanism with minimal latency
+The client operates entirely independently — no server, no control channel, no pool negotiation.
 
-## Signal Communication Mechanism
+```
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                  Client Single-End Forwarding                   │
+  │                                                                 │
+  │   External Caller                     Target Service            │
+  │        │                                    ▲                   │
+  │        │  TCP connect                       │ TCP connect       │
+  │        ▼                                    │                   │
+  │   ┌─────────────────────────────────────────┤                   │
+  │   │  TunnelListener (:port)                 │                   │
+  │   │       │                                 │                   │
+  │   │       │  Accept()                       │                   │
+  │   │       ▼                                 │                   │
+  │   │  [goroutine per connection]             │                   │
+  │   │       │                                 │                   │
+  │   │       │  DialWithRotation(target)       │                   │
+  │   │       ├────────────────────────────────►│                   │
+  │   │       │                                 │                   │
+  │   │       │  conn.DataExchange(src, dst)    │                   │
+  │   │       │◄───────────────────────────────►│                   │
+  │   └─────────────────────────────────────────┘                   │
+  │                                                                 │
+  │   UDP path mirrors this with ReadFromUDP / WriteToUDP +         │
+  │   a TargetUDPSession map keyed by client address                │
+  └─────────────────────────────────────────────────────────────────┘
+```
 
-NodePass uses a JSON-based signaling protocol through the TCP tunnel:
+**Multiple targets with load balancing:**
+
+```
+  DialWithRotation
+       │
+       ├── lbs=0  Round-robin across TargetTCPAddrs[]
+       │
+       ├── lbs=1  Probe all targets with TCP ping, route to lowest latency
+       │
+       └── lbs=2  Primary-backup: prefer index 0, fall back on failure
+                  Reset to 0 after FallbackInterval
+```
+
+---
+
+### Dual-End Pooled (Mode 2)
+
+The server negotiates DataFlow direction during handshake. Two sub-modes result:
+
+#### DataFlow `-` — Server Receives Traffic
+
+```
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  DataFlow "-"  (server binds to target address, receives traffic)    │
+  │                                                                      │
+  │  External        Server                      Client         Local    │
+  │  Caller          (:target)                                  Target   │
+  │     │                │                          │              │     │
+  │     │──TCP connect──►│                          │              │     │
+  │     │                │                          │              │     │
+  │     │         [TunnelTCPLoop]                   │              │     │
+  │     │                │                          │              │     │
+  │     │                │──signal{tcp,id,remote}──►│              │     │
+  │     │                │                          │              │     │
+  │     │                │              [TunnelTCPOnce]            │     │
+  │     │                │                          │              │     │
+  │     │                │◄──pool conn (id)─────────│              │     │
+  │     │                │                          │─TCP connect─►│     │
+  │     │                │                          │              │     │
+  │     │◄═══════════════╪══════════════════════════╪═════════════►│     │
+  │     │     DataExchange (remoteConn ⟷ targetConn)│              │     │
+  │     │                │                          │              │     │
+  └──────────────────────────────────────────────────────────────────────┘
+```
+
+#### DataFlow `+` — Server Sends Traffic
+
+```
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  DataFlow "+"  (client binds locally, server dials remote target)    │
+  │                                                                      │
+  │  Local           Client                       Server        Remote   │
+  │  Caller          (:target)                                  Target   │
+  │     │                │                          │              │     │
+  │     │──TCP connect──►│                          │              │     │
+  │     │                │                          │              │     │
+  │     │         [TunnelTCPLoop]                   │              │     │
+  │     │                │──signal{tcp,id,remote}──►│              │     │
+  │     │                │                          │              │     │
+  │     │                │              [TunnelTCPOnce]            │     │
+  │     │                │◄──pool conn (id)─────────│              │     │
+  │     │                │                          │─TCP connect─►│     │
+  │     │                │                          │              │     │
+  │     │◄═══════════════╪══════════════════════════╪═════════════►│     │
+  │     │     DataExchange (remoteConn ⟷ targetConn)│              │     │
+  │     │                │                          │              │     │
+  └──────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow direction determination:**
+
+```
+  Server.Start()
+       │
+       ├── InitTargetListener OK?
+       │       │
+       │       ├── Yes ──► DataFlow = "-"  (server receives)
+       │       │           RunMode  = "1"
+       │       │
+       │       └── No  ──► DataFlow = "+"  (server sends)
+       │                   RunMode  = "2"
+       │
+       └── DataFlow delivered to client during handshake
+           Client.DataFlow set from server config:
+               "+" → client InitTargetListener (listens locally)
+               "-" → client dials target on each signal
+```
+
+---
+
+### TLS Termination
+
+In single-end forwarding mode, setting `tls=1` or `tls=2` wraps the `TunnelListener` itself with TLS. Callers connect with TLS; the client terminates it and forwards plain TCP to the target.
+
+```
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                      TLS Termination Flow                       │
+  │                                                                 │
+  │  HTTPS Client          NodePass Client         HTTP Backend     │
+  │       │                      │                      │           │
+  │       │   TLS ClientHello    │                      │           │
+  │       │─────────────────────►│                      │           │
+  │       │                      │                      │           │
+  │       │        tls.NewListener wraps raw TCPListener│           │
+  │       │        Accept() returns *tls.Conn           │           │
+  │       │        TLS handshake completes              │           │
+  │       │                      │                      │           │
+  │       │   TLS established    │                      │           │
+  │       │◄─────────────────────│                      │           │
+  │       │                      │                      │           │
+  │       │   HTTP GET /         │                      │           │
+  │       │─────────────────────►│                      │           │
+  │       │   (encrypted)        │ plain TCP connect    │           │
+  │       │                      │─────────────────────►│           │
+  │       │                      │                      │           │
+  │       │                      │   HTTP GET /         │           │
+  │       │                      │─────────────────────►│           │
+  │       │                      │   (plain)            │           │
+  │       │                      │◄─────────────────────│           │
+  │       │◄─────────────────────│                      │           │
+  │       │   (encrypted)        │                      │           │
+  └─────────────────────────────────────────────────────────────────┘
+
+  Applies to any TCP protocol:
+  HTTPS → HTTP  │  WSS → WS  │  TLS DB → plain DB  │  any TLS → plain
+```
+
+How it is wired in `client.go`:
+
+```
+  InitTunnelListener()          raw *net.TCPListener
+       │
+       └── TLSConfig != nil?
+               │
+               Yes ──► TunnelListener = tls.NewListener(rawListener, TLSConfig)
+               No  ──► TunnelListener = rawListener  (unchanged)
+
+  SingleTCPLoop → Accept() → *tls.Conn or *net.TCPConn
+                           → DialWithRotation(target) → plain conn
+                           → conn.DataExchange(tlsConn, plainConn)
+```
+
+---
+
+## Connection Pool
+
+The pool pre-warms connections between server and client before traffic arrives, moving handshake cost off the critical path.
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                    Pool Architecture                             │
+  │                                                                  │
+  │   Server Pool Manager                Client Pool Manager         │
+  │   ───────────────────                ───────────────────         │
+  │                                                                  │
+  │   accept() loop                      dial() loop                 │
+  │        │                                  │                      │
+  │        ▼                                  ▼                      │
+  │   ┌──────────┐  ◄── net.Conn ──►  ┌──────────────┐               │
+  │   │  connMap │    (pooled conn)   │   connMap    │               │
+  │   │ id→conn  │                    │  id→conn     │               │
+  │   └──────────┘                    └──────────────┘               │
+  │        │                                  │                      │
+  │   ┌──────────┐                    ┌──────────────┐               │
+  │   │  idChan  │  ── id string ──►  │   idChan     │               │
+  │   └──────────┘                    └──────────────┘               │
+  │                                                                  │
+  │   IncomingGet(id, timeout)         OutgoingGet(id, timeout)      │
+  │   reads next id from idChan        looks up id in connMap        │
+  │   returns matching conn            returns conn, removes entry   │
+  │                                                                  │
+  │   One connection, one use. Pool manager continuously refills.    │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+### Pool Types
+
+NodePass supports four pool transports. The server selects the type; it is delivered to the client during handshake — the client does not need to specify it.
+
+#### Type 0 — TCP Pool (default)
+
+```
+  Server                              Client
+    │                                   │
+    │   Listen on TunnelTCPAddr         │
+    │◄──────────────────────────────────│  dial TunnelTCPAddr
+    │                                   │
+    │   per connection:                 │
+    │   • optional TLS wrap (tls code)  │
+    │   • generate 8-char hex ID        │
+    │   • store in connMap              │
+    │   • push ID to idChan             │
+    │                                   │
+    │   Multiple independent TCP connections fill the pool
+    │   Each carries one data exchange then closes
+```
+
+#### Type 1 — QUIC Pool
+
+```
+  Server                              Client
+    │                                   │
+    │   Listen on TunnelUDPAddr (QUIC)  │
+    │◄──────────────────────────────────│  single QUIC connection
+    │                                   │
+    │   Single QUIC connection carries all pool streams:
+    │                                   │
+    │   ┌──────────────────────────┐    │
+    │   │  QUIC Connection         │    │
+    │   │  ┌──────┐ ┌──────┐       │    │
+    │   │  │stream│ │stream│ ...   │    │
+    │   │  │  #1  │ │  #2  │       │    │
+    │   │  └──────┘ └──────┘       │    │
+    │   └──────────────────────────┘    │
+    │                                   │
+    │   Mandatory TLS 1.3               │
+    │   0-RTT reconnection supported    │
+    │   No head-of-line blocking        │
+    │   One stream = one pool slot      │
+```
+
+#### Type 2 — WebSocket Pool
+
+```
+  Server                              Client
+    │                                   │
+    │   HTTP listener (ws:// or wss://) │
+    │◄──────────────────────────────────│  HTTP Upgrade request
+    │                                   │
+    │   GET / HTTP/1.1                  │
+    │   Upgrade: websocket              │
+    │   Sec-WebSocket-Key: ...          │
+    │                                   │
+    │──► 101 Switching Protocols        │
+    │                                   │
+    │   Full-duplex WebSocket frame     │
+    │   traverses HTTP proxies and CDNs │
+    │   Uses standard HTTPS port        │
+    │   Requires TLS (tls=1 minimum)    │
+```
+
+#### Type 3 — HTTP/2 Pool
+
+```
+  Server                              Client
+    │                                   │
+    │   TLS listener (h2 ALPN)          │
+    │◄──────────────────────────────────│  TLS + ALPN "h2"
+    │                                   │
+    │   Single TLS connection carries all streams:
+    │                                   │
+    │   ┌──────────────────────────┐    │
+    │   │  HTTP/2 Connection       │    │
+    │   │  HPACK header compress.  │    │
+    │   │  ┌──────┐ ┌──────┐       │    │
+    │   │  │stream│ │stream│ ...   │    │
+    │   │  │  #1  │ │  #2  │       │    │
+    │   │  └──────┘ └──────┘       │    │
+    │   └──────────────────────────┘    │
+    │                                   │
+    │   Binary framing protocol         │
+    │   Per-stream flow control         │
+    │   Requires TLS (tls=1 minimum)    │
+```
+
+### Pool Lifecycle
+
+```
+  Pool Manager goroutine (runs continuously)
+       │
+       ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │  Loop:                                                  │
+  │                                                         │
+  │  1. Check capacity: active < target?                    │
+  │          │                                              │
+  │          ├── Yes: create new connection/stream          │
+  │          │        assign random 8-char hex ID           │
+  │          │        store in connMap[id] = conn           │
+  │          │        push id to idChan (buffered)          │
+  │          │                                              │
+  │          └── No:  sleep(interval), then loop            │
+  │                                                         │
+  │  2. Adjust interval (see Auto-Scaling below)            │
+  │                                                         │
+  │  3. Adjust capacity target (see Auto-Scaling below)     │
+  └─────────────────────────────────────────────────────────┘
+
+  Connection acquisition (data path):
+       │
+       ├── IncomingGet: read next ID from idChan, return connMap[id]
+       │
+       └── OutgoingGet: look up specific ID in connMap, remove + return
+```
+
+### Auto-Scaling
+
+```
+  ┌────────────────────────────────────────────────────────────────┐
+  │  Capacity Adjustment                                           │
+  │                                                                │
+  │  success rate high  ──► expand capacity (up to MaxPool)        │
+  │  success rate low   ──► contract capacity (down to MinPool)    │
+  │                                                                │
+  │  Bounds:                                                       │
+  │    MinPool — set by client (guarantees warm connection floor)  │
+  │    MaxPool — delivered by server during handshake              │
+  │                                                                │
+  ├────────────────────────────────────────────────────────────────┤
+  │  Interval Adjustment                                           │
+  │                                                                │
+  │  idle count low  ──► shorten interval (faster refill)          │
+  │  idle count high ──► lengthen interval (slow down, save CPU)   │
+  │                                                                │
+  │  Bounds:                                                       │
+  │    MinPoolInterval (default 100ms) — floor on creation rate    │
+  │    MaxPoolInterval (default 1s)    — ceiling on creation rate  │
+  └────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Signal Protocol
+
+All control signals travel over a persistent TCP connection (the control channel) as newline-delimited records.
+
+### Encoding Pipeline
+
+```
+  Send side:
+  ┌──────────┐    ┌─────────────────┐    ┌────────────┐    ┌──────┐
+  │  Signal  │───►│ json.Marshal()  │───►│ XOR(key)   │───►│ B64  │──► \n
+  │  struct  │    │                 │    │            │    │      │
+  └──────────┘    └─────────────────┘    └────────────┘    └──────┘
+
+  Receive side:
+  \n ──► strip \n ──► Base64 decode ──► XOR(key) ──► json.Unmarshal ──► Signal struct
+
+  XOR key = TunnelKey string, cycled with modulo indexing
+  Both sides share TunnelKey — derived from URL password or port hash
+```
 
 ### Signal Types
-1. **Flush Signal**:
-   - Format: `{"action":"flush"}`
-   - Purpose: Flushes the connection pool and resets error count
-   - Timing: Sent when connection pool health check fails
-
-2. **PING Signal**:
-   - Format: `{"action":"ping"}`
-   - Purpose: Checks client connection status and requests PONG response
-   - Timing: Sent during periodic health checks
-
-3. **PONG Signal**:
-   - Format: `{"action":"pong"}`
-   - Purpose: Responds to PING signal and reports system status
-   - Timing: Sent when PING signal is received
-
-4. **Verify Signal**:
-   - Format: `{"action":"verify","id":"connection_id","fp":"tls_fingerprint"}`
-   - Purpose: Verifies TLS certificate fingerprint
-   - Timing: Sent after establishing TLS connection
-
-5. **TCP Launch Signal**:
-   - Format: `{"action":"tcp","remote":"remote_addr","id":"connection_id"}`
-   - Purpose: Requests the client to establish a TCP connection for a specific ID
-   - Timing: Sent when a new TCP connection to the target service is received
-
-6. **UDP Launch Signal**:
-   - Format: `{"action":"udp","remote":"remote_addr","id":"connection_id"}`
-   - Purpose: Requests the client to handle UDP traffic for a specific ID
-   - Timing: Sent when UDP data is received on the target port
-
-### Signal Flow
-1. **Signal Generation**:
-   - Server creates JSON-formatted signals for specific events
-   - Signal is terminated with a newline character for proper parsing
-
-2. **Signal Transmission**:
-   - Server writes signals to the TCP tunnel connection
-   - Uses a mutex to prevent concurrent writes to the tunnel
-
-3. **Signal Reception**:
-   - Client uses a buffered reader to read signals from the tunnel
-   - Signals are parsed into JSON format
-
-4. **Signal Processing**:
-   - Client places valid signals in a buffered channel (signalChan)
-   - A dedicated goroutine processes signals from the channel
-   - Semaphore pattern prevents signal overflow
-
-5. **Signal Execution**:
-   - Dispatches to appropriate handling logic based on the `action` field
-   - Connection launch signals trigger respective methods to establish connections
-
-### Signal Resilience
-- Buffered channel with configurable capacity prevents signal loss during high load
-- Semaphore implementation ensures controlled concurrency
-- Error handling for malformed or unexpected signals
-
-## Connection Pool Architecture
-
-NodePass implements an efficient connection pooling system for managing network connections, which forms the core of its performance advantages. NodePass supports three transport protocols for connection pools: traditional TCP-based pools, modern QUIC-based UDP pools, and WebSocket-based pools.
-
-### Transport Protocol Selection
-
-NodePass provides three connection pool transport options via the `type` parameter:
-
-1. **TCP-based Pool (type=0, default)**:
-   - Traditional TCP connections managed by the `pool` library
-   - Multiple independent TCP connections between client and server
-   - Standard TLS encryption over individual TCP connections
-   - Well-tested and widely compatible approach
-
-2. **QUIC-based Pool (type=1)**:
-   - UDP-based multiplexed streams managed by the `quic` library
-   - Single QUIC connection with multiple concurrent streams
-   - Mandatory TLS 1.3 encryption with 0-RTT support
-   - Superior performance in high-latency and mobile networks
-
-3. **WebSocket-based Pool (type=2)**:
-   - WebSocket connections established via HTTP upgrade
-   - Can traverse HTTP proxies and CDNs
-   - Uses standard HTTPS ports
-   - Suitable for enterprise environments and firewall-restricted scenarios
-
-### QUIC Pool Architecture
-
-When `type=1` is enabled, NodePass uses QUIC protocol for connection pooling with the following characteristics:
-
-**Stream Multiplexing**:
-- Single UDP connection carries multiple bidirectional streams
-- Each stream represents an individual tunnel connection
-- Streams are independent: one stream's packet loss doesn't affect others
-- Stream-level flow control prevents head-of-line blocking
-
-**Connection Establishment**:
-- Server listens on UDP port and accepts QUIC connections
-- Client establishes single QUIC connection to server
-- Server generates unique stream IDs for each incoming connection
-- Client opens new streams on-demand using provided stream IDs
-
-**Stream Lifecycle**:
-1. **Stream Creation** (Server side):
-   - Server accepts new QUIC connection from authorized client
-   - For each target connection, server opens bidirectional stream
-   - Server generates 4-byte random stream ID
-   - Stream ID sent to client for correlation
-
-2. **Stream Retrieval** (Client side):
-   - Client receives stream ID via control channel signal
-   - Client retrieves corresponding stream from QUIC connection
-   - Stream wrapped as `net.Conn` for compatibility
-   - Stream used for data exchange with target endpoint
-
-3. **Stream Termination**:
-   - Stream closed after data exchange completes
-   - Graceful closure with proper cleanup
-   - QUIC connection remains active for future streams
-
-**Dynamic Management**:
-- Pool capacity adjusted based on stream creation success rate
-- Stream creation intervals adapt to pool utilization
-- Automatic stream capacity scaling within min/max boundaries
-- Keep-alive mechanism maintains QUIC connection health
-
-**Security Features**:
-- Mandatory TLS 1.3 encryption for all QUIC connections
-- Three TLS modes supported:
-  - Mode 0/1: InsecureSkipVerify for testing/development
-  - Mode 2: Full certificate verification for production
-- Client IP restriction available on server side
-- ALPN protocol negotiation ("np-quic")
-
-**Performance Advantages**:
-- Reduced connection overhead: single UDP socket for all streams
-- 0-RTT connection resumption for faster reconnection
-- Better congestion control with stream-level prioritization
-- Improved NAT traversal compared to multiple TCP connections
-- Lower latency in packet loss scenarios (no head-of-line blocking)
-
-### WebSocket Pool Architecture
-
-When `type=2` is enabled, NodePass uses WebSocket protocol for connection pooling with the following characteristics:
-
-**HTTP Upgrade Mechanism**:
-- WebSocket connections established via standard HTTP upgrade requests
-- Compatible with HTTP/1.1 proxies and CDNs
-- Uses standard port 80 (ws) or 443 (wss)
-- Supports custom HTTP headers for authentication and routing
-
-**Connection Establishment**:
-- Server listens on TCP port for HTTP requests
-- Client initiates HTTP upgrade request to WebSocket
-- After handshake completion, connection upgrades to full-duplex WebSocket
-- Server assigns unique connection ID for each incoming connection
-
-**Connection Lifecycle**:
-1. **Connection Creation** (Server side):
-   - Server accepts HTTP upgrade request from authorized client
-   - Validates WebSocket handshake parameters (Origin, protocol, etc.)
-   - Upgrades connection and adds it to connection pool
-   - Generates connection ID sent to client for correlation
-
-2. **Connection Retrieval** (Client side):
-   - Client receives connection ID via control channel
-   - Client retrieves corresponding connection from WebSocket pool
-   - Connection wrapped as `net.Conn` for compatibility
-   - Connection used for data exchange with target endpoint
-
-3. **Connection Termination**:
-   - WebSocket close frame sent after data exchange completes
-   - Graceful closure with proper cleanup of underlying TCP connection
-   - Supports close reason codes and description messages
-
-**Dynamic Management**:
-- Pool capacity adjusted based on connection creation success rate
-- Connection creation intervals adapt to pool utilization
-- Automatic connection capacity scaling within min/max boundaries
-- Ping/Pong frames maintain connection health status
-
-**Security Features**:
-- Supports WSS (WebSocket Secure) with TLS encryption
-- TLS is required for WebSocket pool
-- Two TLS modes supported:
-  - Mode 1: WSS with self-signed certificates
-  - Mode 2: WSS with full certificate verification for production
-- Origin validation prevents cross-site WebSocket hijacking
-- Supports custom authentication headers
-
-**Traversal Advantages**:
-- Uses standard HTTP/HTTPS ports, easy to traverse firewalls
-- Compatible with enterprise HTTP proxies and load balancers
-- Can be deployed through CDNs and reverse proxies
-- Blends with HTTP traffic, reducing detection and blocking risks
-- Requires TLS encryption
-
-### Design Philosophy
-The connection pool design follows the principle of "warm-up over cold start," eliminating network latency through pre-established connections. This design philosophy draws from modern high-performance server best practices, amortizing the cost of connection establishment to the system startup phase rather than bearing this overhead on the critical path.
-
-All three pool types share this philosophy but implement it differently:
-- **TCP pools**: Pre-establish multiple independent TCP connections
-- **QUIC pools**: Pre-create multiple streams over a single QUIC connection
-- **WebSocket pools**: Pre-establish multiple WebSocket connections
-
-### Pool Design
-1. **Pool Types**:
-   - **Client Pool**: Pre-establishes connections/streams to the remote endpoint with active connection management
-   - **Server Pool**: Manages incoming connections/streams from clients with passive connection acceptance
-
-2. **Pool Components**:
-   - **Connection/Stream Storage**: Thread-safe map of connection IDs to net.Conn objects, supporting high-concurrency access
-   - **ID Channel**: Buffered channel for available connection IDs, enabling lock-free rapid allocation
-   - **Capacity Management**: Dynamic adjustment based on usage patterns, implementing intelligent scaling
-     - Minimum capacity set by client, ensuring basic connection guarantee for client
-     - Maximum capacity delivered by server during handshake, enabling global resource coordination
-   - **Interval Control**: Time-based throttling between connection/stream creations, preventing network resource overload
-   - **Connection Factory**: Customizable connection creation function
-     - TCP mode: Standard TCP dialing and TLS handshake
-     - QUIC mode: Stream management and multiplexing
-     - WebSocket mode: HTTP upgrade and handshake handling
-
-### Advanced Design Features
-1. **Zero-Latency Connections**:
-   - Pre-established connection pools eliminate TCP three-way handshake delays
-   - TLS handshakes complete during connection pool initialization, avoiding runtime encryption negotiation overhead
-   - Connection warm-up strategies ensure hot connections are always available in the pool
-   - **QUIC Enhancement**: 0-RTT support further reduces reconnection latency
-
-2. **Intelligent Load Awareness**:
-   - Dynamic pool management based on real-time connection utilization
-   - Predictive connection creation based on historical usage patterns
-   - Adaptive timeout and retry mechanisms responding to network fluctuations
-
-### Connection Lifecycle
-1. **Connection Creation**:
-   - Connections/streams are created up to the configured capacity, ensuring resource controllability
-   - Each connection is assigned a unique ID, supporting precise connection tracking and management
-   - IDs and connections are stored in the pool with copy-on-write and delayed deletion strategies
-   - **TCP Mode**: Creates individual TCP connections with optional TLS
-   - **QUIC Mode**: Opens bidirectional streams over shared QUIC connection
-   - **WebSocket Mode**: Establishes WebSocket connections via HTTP upgrade
-
-2. **Connection Acquisition**:
-   - Client retrieves connections using connection IDs, supporting precise matching and fast lookups
-   - Server retrieves the next available connection from the pool using round-robin or least-used strategies
-   - Connections are validated before being returned, including network status and TLS session checks
-
-3. **Connection Usage**:
-   - Connection is removed from the pool when acquired, avoiding reuse conflicts
-   - Used for data exchange between endpoints with efficient zero-copy transmission
-   - One-time use model ensures connection state cleanliness
-
-4. **Connection Termination**:
-   - Connections are closed immediately after use, preventing resource leaks
-   - Proper release of system resources including file descriptors and memory buffers
-   - Error handling ensures clean termination under exceptional conditions
-
-### Session Management and State Maintenance
-1. **Stateful UDP Processing**:
-   - Converts stateless UDP protocol into stateful session handling
-   - Intelligent session timeout management, balancing resource usage and responsiveness
-   - Session reuse mechanisms, reducing connection establishment overhead
-
-2. **TCP Connection Management**:
-   - Connection pool management for efficient resource utilization
-   - One-time use model for connection pool entries to ensure state cleanliness
-   - Connection health monitoring and automatic cleanup
-
-3. **Cross-Protocol Unified Management**:
-   - Unified connection lifecycle management, simplifying system complexity
-   - Protocol-agnostic monitoring and statistics, providing consistent observability experience
-   - Flexible protocol conversion capabilities, supporting heterogeneous network environments
-
-## Signal Communication and Coordination Mechanisms
-
-NodePass's signaling system embodies the essence of distributed system design:
-
-### Signal Design Principles
-1. **Event-Driven Architecture**:
-   - Event-based asynchronous communication patterns, avoiding blocking waits
-   - Publish-subscribe pattern for signal distribution, supporting multiple subscribers
-   - Signal priority management, ensuring timely processing of critical events
-
-2. **Reliability Guarantees**:
-   - Signal persistence mechanisms, preventing critical signal loss
-   - Retry and acknowledgment mechanisms, ensuring reliable signal delivery
-   - Idempotent signal design, avoiding side effects from repeated execution
-
-3. **Performance Optimization**:
-   - Batch signal processing, reducing system call overhead
-   - Signal compression and merging, optimizing network bandwidth usage
-   - Asynchronous signal processing, avoiding blocking of main processing flows
-
-### Distributed Coordination
-1. **Consistency Guarantees**:
-   - Distributed locking mechanisms, ensuring atomicity of critical operations
-   - State synchronization protocols, maintaining data consistency across multiple nodes
-   - Conflict resolution strategies, handling race conditions in concurrent operations
-
-2. **Fault Handling**:
-   - Node failure detection, timely discovery and isolation of failed nodes
-   - Automatic failover, ensuring service continuity
-   - State recovery mechanisms, supporting rapid recovery after failures
-
-### Pool Management
-1. **Capacity Control**:
-   - Minimum capacity guarantee: Ensures sufficient warm connections are always available
-   - Maximum capacity limit: Prevents excessive resource consumption, protecting system stability
-   - Dynamic scaling based on demand patterns, responding to traffic changes
-
-2. **Interval Control**:
-   - Minimum interval limit: Prevents connection creation storms, protecting network resources
-   - Maximum interval limit: Ensures timely response to connection demands
-   - Adaptive time-based throttling to optimize resource usage
-
-3. **Dynamic Pool Adaptation**:
-   The connection pool employs a dual-adaptive mechanism to ensure optimal performance:
-   
-   **A. Capacity Adjustment**
-   - Pool capacity dynamically adjusts based on real-time usage patterns, implementing intelligent scaling
-   - Feedback adjustment based on connection creation success rate: contracts capacity during low success rates to reduce resource waste
-   - Expands capacity during high success rates to meet growing demands
-   - Gradual scaling prevents system oscillation, providing smooth performance transitions
-   - Strictly respects configured capacity boundaries, ensuring system controllability
-   
-   **B. Interval Adjustment**
-   - Creation intervals adapt based on pool idle connection count in real-time
-   - Accelerates connection creation during low idle rates, ensuring adequate supply
-   - Slows creation pace during high idle rates, avoiding resource waste
-   - Prevents pressure on network resources during low-demand periods
-   - Accelerates connection creation during high-demand periods when pool is depleting, ensuring service quality
-
-4. **Performance Optimization Strategies**:
-   - **Predictive Scaling**: Forecasts future demands based on historical usage patterns
-   - **Tiered Connection Management**: Different priority connections use different management strategies
-   - **Batch Operation Optimization**: Bulk creation and destruction of connections, reducing system call overhead
-   - **Connection Affinity**: Intelligent connection allocation based on geographic location or network topology
-
-## Data Exchange Mechanisms
-
-NodePass's data exchange mechanisms embody modern network programming best practices:
-
-### High-Performance Data Transfer
-1. **Zero-Copy Architecture**:
-   - Data transfers directly in kernel space, avoiding multiple copies in user space
-   - Reduces CPU overhead and memory bandwidth consumption
-   - Supports optimized transmission for large files and high-throughput scenarios
-
-2. **Asynchronous I/O Model**:
-   - Non-blocking event-driven architecture maximizes concurrent processing capabilities
-   - Efficient event loops based on epoll/kqueue
-   - Intelligent read/write buffer management, balancing memory usage and performance
-
-3. **Traffic Statistics and Monitoring**:
-   - Real-time byte-level traffic statistics, supporting precise bandwidth control
-   - Protocol-specific traffic analysis, facilitating performance tuning
-   - Connection-level performance metrics, supporting fine-grained monitoring
-   - Real-time tracking of active TCP and UDP connection counts for capacity planning and performance analysis
-
-### Protocol Optimization
-1. **TCP Optimization**:
-   - Intelligent TCP_NODELAY configuration, reducing small packet delays
-   - Keep-alive mechanisms ensure long connection reliability
-   - Adaptive selection of congestion control algorithms
-
-2. **UDP Optimization**:
-   - Session-based UDP processing, supporting stateful datagram exchange
-   - Intelligent timeout management, balancing responsiveness and resource usage
-   - Datagram deduplication and out-of-order processing
-
-## Master API Architecture
-
-In master mode, NodePass provides a RESTful API for centralized management, embodying cloud-native architectural design principles:
-
-### Architectural Design Philosophy
-Master mode adopts a "unified management, distributed execution" architecture pattern, separating the control plane from the data plane. This design gives the system enterprise-grade manageability and observability while maintaining high-performance data transmission.
-
-### API Components
-1. **HTTP/HTTPS Server**:
-   - Listens on configured address and port, supporting flexible network deployment
-   - Optional TLS encryption with same security modes as tunnel server, ensuring management channel security
-   - Configurable API prefix path, supporting reverse proxy and API gateway integration
-
-2. **Instance Management**:
-   - High-performance memory-based instance registry, supporting fast queries and updates
-   - UID-based instance identification, ensuring global uniqueness
-   - State tracking for each instance (running, stopped, etc.), supporting real-time status monitoring
-
-3. **RESTful Endpoints**:
-   - Standard CRUD operations following REST design principles
-   - Instance control actions (start, stop, restart), supporting remote lifecycle management
-   - Health status reporting, providing real-time system health information
-   - OpenAPI specification support, facilitating API documentation generation and client development
-
-### Instance Lifecycle Management
-1. **Instance Creation**:
-   - URL-based configuration similar to command line, reducing learning curve
-   - Dynamic initialization based on instance type, supporting multiple deployment modes
-   - Parameter validation before instance creation, ensuring configuration correctness
-
-2. **Instance Control**:
-   - Start/stop/restart capabilities, supporting remote operations
-   - Graceful shutdown with configurable timeout, ensuring data integrity
-   - Resource cleanup on termination, preventing resource leaks
-
-3. **API Security**:
-   - TLS encryption options for API connections, protecting management communication security
-   - Same security modes as tunnel server, unified security policies
-   - Certificate management support, simplifying HTTPS deployment
-
-## System Architecture Advancement
-
-### Layered Decoupling Design
-NodePass adopts layered design principles of modern software architecture:
-
-1. **Transport Layer Separation**:
-   - Complete separation of control and data channels, avoiding control information interference with data transmission
-   - Independent optimization for different protocols, TCP and UDP each using optimal strategies
-   - Multiplexing support, single tunnel carrying multiple application connections
-
-2. **Pluggable Security Layer**:
-   - Modular TLS implementation, supporting flexible selection of different security levels
-   - Automated certificate management, reducing operational complexity
-   - Key rotation mechanisms, enhancing long-term security
-
-3. **Cloud-Native Management Layer**:
-   - API-first design philosophy, all functions accessible through APIs
-   - Container-friendly configuration methods, supporting modern DevOps practices
-   - Stateless design, facilitating horizontal scaling
-
-### Performance Optimization Philosophy
-1. **Latency Optimization**:
-   - Pre-connection pools eliminate cold start latency
-   - Intelligent routing reduces network hops
-   - Batch processing reduces system call overhead
-
-2. **Throughput Optimization**:
-   - Zero-copy data transmission maximizes bandwidth utilization
-   - Concurrent connection management supports high-concurrency scenarios
-   - Adaptive buffer sizing optimizes memory usage
-
-3. **Resource Optimization**:
-   - Intelligent connection reuse reduces resource consumption
-   - Dynamic capacity adjustment adapts to load changes
-   - Garbage collection optimization reduces pause times
-
-### Reliability Guarantees
-1. **Fault Isolation**:
-   - Connection-level fault isolation, single point failures don't affect overall service
-   - Automatic reconnection mechanisms, transparently handling network fluctuations
-   - Graceful degradation strategies, ensuring core functionality under resource constraints
-
-2. **State Management**:
-   - Distributed state synchronization, ensuring consistency across multiple instances
-   - Persistence of critical state, supporting failure recovery
-   - Versioned configuration management, supporting rollback operations
-
-## NodePass Architecture Innovation Summary
-
-### Technical Innovation Points
-1. **Connection Pool Warm-up Technology**:
-   - Revolutionarily eliminates cold start latency in network tunnels
-   - Transforms traditional "connect-on-demand" to "pre-warm-and-ready"
-   - Significantly improves first connection response speed
-
-2. **Separated Architecture Design**:
-   - Complete separation of control plane and data plane
-   - Independent optimization of signaling and data channels
-   - Achieves perfect combination of high performance and high manageability
-
-3. **Adaptive Resource Management**:
-   - Intelligent scaling based on real-time load
-   - Predictive resource allocation strategies
-   - Self-healing resilient system design
-
-### Industry-Leading Advantages
-1. **Performance Advantages**:
-   - Zero-latency connection establishment, industry-leading response speed
-   - High concurrency processing capabilities, supporting enterprise-grade application scenarios
-   - Intelligent routing optimization, shortest path data transmission
-
-2. **Reliability Advantages**:
-   - Multi-layer fault isolation and recovery mechanisms
-   - High availability guarantees of distributed architecture
-   - Graceful degradation service quality assurance
-
-3. **Security Advantages**:
-   - End-to-end encryption protection
-   - Multi-layer security protection system
-   - Compliance with enterprise-grade security standards
-
-### Applicable Scenarios and Value
-1. **Enterprise Applications**:
-   - Service mesh for microservice architectures
-   - Network connections in hybrid cloud environments
-   - Cross-regional service access
-
-2. **Development and Operations**:
-   - Rapid setup of local development environments
-   - Flexible configuration of test environments
-   - Traffic management in production environments
-
-3. **Network Optimization**:
-   - Significant reduction in network latency
-   - Notable improvement in bandwidth utilization
-   - Reliable guarantee of connection stability
-
-NodePass, through its innovative architectural design and technical implementation, provides a high-performance, high-reliability, high-security tunnel solution for modern network applications, representing the future direction of network tunnel technology.
+
+```
+  ┌───────────┬──────────────┬──────────────────────────────────────────┐
+  │  Signal   │  Direction   │  Purpose                                 │
+  ├───────────┼──────────────┼──────────────────────────────────────────┤
+  │  tcp      │  S → C       │  New TCP connection. Carries pool conn   │
+  │           │  C → S       │  ID and original remote address.         │
+  ├───────────┼──────────────┼──────────────────────────────────────────┤
+  │  udp      │  S → C       │  New UDP datagram. Carries pool conn ID  │
+  │           │  C → S       │  and originating client address.         │
+  ├───────────┼──────────────┼──────────────────────────────────────────┤
+  │  verify   │  bidirect    │  Exchange TLS certificate SHA-256        │
+  │           │              │  fingerprint. tls=1 only. Mismatch       │
+  │           │              │  cancels the session.                    │
+  ├───────────┼──────────────┼──────────────────────────────────────────┤
+  │  ping     │  either      │  Health check request.                   │
+  ├───────────┼──────────────┼──────────────────────────────────────────┤
+  │  pong     │  either      │  Health check response. Receiver logs    │
+  │           │              │  latency, pool size, slot counts,        │
+  │           │              │  and byte counters.                      │
+  ├───────────┼──────────────┼──────────────────────────────────────────┤
+  │  flush    │  either      │  Instruct peer to flush and reset the    │
+  │           │              │  connection pool. Triggered when pool    │
+  │           │              │  error count > active/2.                 │
+  └───────────┴──────────────┴──────────────────────────────────────────┘
+```
+
+### Signal Flow (TCP connection example)
+
+```
+  DataFlow "-": Server receives traffic, signals client
+
+  External        Server                 Client           Local
+  Caller                                                  Target
+    │               │                      │                │
+    │──connect─────►│                      │                │
+    │               │                      │                │
+    │         accept()                     │                │
+    │               │                      │                │
+    │         IncomingGet(pool)            │                │
+    │         id = "a3f9c12b"              │                │
+    │               │                      │                │
+    │               │──signal──────────────►                │
+    │               │  { action:"tcp",     │                │
+    │               │    id:"a3f9c12b",    │                │
+    │               │    remote:"1.2.3.4" }│                │
+    │               │                      │                │
+    │               │               OutgoingGet("a3f9c12b") │
+    │               │               conn from pool          │
+    │               │                      │                │
+    │               │                      │──connect──────►│
+    │               │                      │                │
+    │◄══════════════╪══════════════════════╪═══════════════►│
+    │            DataExchange (full-duplex, until EOF)      │
+```
+
+### Signal Dispatch Loop
+
+```
+  CommonQueue goroutine                 CommonOnce goroutine
+  ─────────────────────                ──────────────────────
+  BufReader.ReadBytes('\n')             for signal := range SignalChan:
+       │                                    │
+       │ Decode (B64 + XOR)                 ├── "tcp"    → go TunnelTCPOnce
+       │ json.Unmarshal → Signal            ├── "udp"    → go TunnelUDPOnce
+       │                                    ├── "verify" → go OutgoingVerify
+       ▼                                    ├── "flush"  → pool.Flush()
+  SignalChan ──────────────────────────►    ├── "ping"   → write pong signal
+  (buffered, SemaphoreLimit capacity)       └── "pong"   → log checkpoint stats
+```
+
+---
+
+## TLS Modes
+
+TLS is configured with the `tls=` parameter and applies to the data channel pool connections. In client single mode it additionally controls listener TLS termination.
+
+```
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  tls=0   No TLS                                                    │
+  │                                                                    │
+  │   Pool conn ──► raw TCP ──► target                                 │
+  │   Fast. No encryption overhead.                                    │
+  └────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  tls=1   RAM Certificate (self-signed, ECDSA P-256, TLS 1.3)       │
+  │                                                                    │
+  │   Startup:                                                         │
+  │     NewTLSConfig()                                                 │
+  │       ecdsa.GenerateKey(P-256)                                     │
+  │       x509.CreateCertificate(1-year validity)                      │
+  │       tls.X509KeyPair → tls.Config                                 │
+  │                                                                    │
+  │   After handshake:                                                 │
+  │     Server regenerates cert (fresh key material per session)       │
+  │     Server → verify signal → client fingerprint                    │
+  │     Client → verify signal → server fingerprint                    │
+  │     SHA-256(cert.Raw) compared on both sides                       │
+  │     Mismatch → context.Cancel()                                    │
+  │                                                                    │
+  │   Pool conn ──► tls.Server/Client(rawConn, cfg) ──► target         │
+  └────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  tls=2   File Certificate (PEM, hot reload)                        │
+  │                                                                    │
+  │   Startup:                                                         │
+  │     tls.LoadX509KeyPair(crtFile, keyFile)                          │
+  │                                                                    │
+  │   GetCertificate callback (called per TLS handshake):              │
+  │     if time.Since(lastReload) >= ReloadInterval (default 1h):      │
+  │       reload cert from disk                                        │
+  │       update cachedCert in-place                                   │
+  │       zero downtime — existing connections unaffected              │
+  │                                                                    │
+  │   Pool conn ──► tls.Server/Client(rawConn, cfg) ──► target         │
+  └────────────────────────────────────────────────────────────────────┘
+```
+
+### TLS Fingerprint Verification (tls=1)
+
+```
+  Server side                           Client side
+       │                                     │
+       │  cert = TLSConfig.Certificates[0]   │
+       │  fp = SHA-256(cert.Certificate[0])  │
+       │  signal{verify, id, fp: serverFP}   │
+       │─────────────────────────────────────►
+       │                                     │
+       │          state = conn.ConnectionState()
+       │          fp = SHA-256(PeerCertificates[0].Raw)
+       │◄─────────────────────────────────────
+       │  signal{verify, id, fp: clientFP}   │
+       │                                     │
+       │  Compare serverFP == clientFP       │
+       │       │                             │
+       │       ├── Match ──► VerifyChan ◄─── TunnelLoop unblocks
+       │       │                             │
+       │       └── Mismatch ──► Cancel()     │
+```
+
+---
+
+## UDP Handling
+
+UDP is stateless at the transport layer. NodePass imposes sessions on top using a `sync.Map` keyed by client address.
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                     UDP Session Lifecycle                        │
+  │                                                                  │
+  │  UDP Client           NodePass           UDP Target              │
+  │      │                    │                  │                   │
+  │      │──datagram─────────►│                  │                   │
+  │      │                    │                  │                   │
+  │      │          sessionKey = clientAddr.String()                 │
+  │      │                    │                  │                   │
+  │      │          TargetUDPSession.Load(key)?  │                   │
+  │      │                    │                  │                   │
+  │      │          ┌── Found ──► reuse conn     │                   │
+  │      │          │                            │                   │
+  │      │          └── Not found:               │                   │
+  │      │               acquire pool conn       │                   │
+  │      │               Store(key, conn)        │                   │
+  │      │               spawn read-back goroutine                   │
+  │      │                    │                  │                   │
+  │      │          writeUDPFrame(conn, data)    │                   │
+  │      │                    │──4-byte len──────►                   │
+  │      │                    │──payload─────────►                   │
+  │      │                    │                  │                   │
+  │      │          read-back goroutine:         │                   │
+  │      │                    │◄──4-byte len──────                   │
+  │      │                    │◄──payload─────────                   │
+  │      │◄──datagram─────────│                  │                   │
+  │      │                    │                  │                   │
+  │      │         Session expires after UDPReadTimeout (default 30s)│
+  │      │         Delete(key) + conn.Close()    │                   │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+**UDP framing format:**
+
+```
+  ┌───────────────────────────────┐
+  │  4 bytes  │  N bytes          │
+  │  length   │  payload          │
+  │  (uint32) │                   │
+  └───────────────────────────────┘
+
+  writeUDPFrame: binary.Write(conn, BigEndian, uint32(len)) + conn.Write(data)
+  readUDPFrame:  binary.Read(conn, BigEndian, &length) + io.ReadFull(conn, buf[:length])
+```
+
+---
+
+## Health and Load Management
+
+### Health Check Loop
+
+```
+  HealthCheck goroutine (ReportInterval ticker, default 5s)
+       │
+       ├── pool.ErrorCount() > pool.Active() / 2 ?
+       │       │
+       │       Yes ──► send flush signal to peer
+       │               pool.Flush() locally
+       │               pool.ResetError()
+       │
+       ├── lbs=1 (latency-based) && len(targets) > 1 ?
+       │       │
+       │       Yes ──► ProbeBestTarget()
+       │               goroutine per target: TCP dial + measure RTT
+       │               store best index in TargetIdx atomically
+       │
+       └── CheckPoint = now
+           send ping signal to peer
+           wait for pong → log:
+               MODE | PING latency | POOL active | TCPS | UDPS | TCPRX | TCPTX | UDPRX | UDPTX
+```
+
+### Slot and Rate Limiting
+
+```
+  Per connection:
+  ┌──────────────────────────────────────────────────────────────┐
+  │  TryAcquireSlot(isUDP)                                       │
+  │      │                                                       │
+  │      │  currentTotal = atomic.Load(TCPSlot + UDPSlot)        │
+  │      │                                                       │
+  │      ├── currentTotal >= SlotLimit? ──► reject connection    │
+  │      │                                                       │
+  │      └── atomic.Add(TCPSlot or UDPSlot, +1)                  │
+  │          defer ReleaseSlot → atomic.Add(-1) on close         │
+  └──────────────────────────────────────────────────────────────┘
+
+  Per byte:
+  ┌──────────────────────────────────────────────────────────────┐
+  │  conn.StatConn wraps net.Conn                                │
+  │      • RX/TX counters updated on every Read/Write            │
+  │      • RateLimiter (token bucket) applied per connection     │
+  │        rate=100 → 100 * 125000 = 12.5 MB/s token budget      │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+### Protocol Blocking
+
+```
+  DetectBlockProtocol(conn)
+       │
+       │  bufio.Reader.Peek(8)  — non-destructive first-byte inspection
+       │
+       ├── BlockSOCKS: b[0]==0x04 + b[1]==0x01/0x02  ──► reject "SOCKS4"
+       │               b[0]==0x05 + b[1] in [1..3]   ──► reject "SOCKS5"
+       │
+       ├── BlockHTTP:  b[0..n] is uppercase ASCII + space ──► reject "HTTP"
+       │
+       └── BlockTLS:   b[0]==0x16 (TLS record type)  ──► reject "TLS"
+
+       Allowed: return ReaderConn{Conn, reader} — peeked bytes still readable
+       Blocked: log warning, close connection
+```
+
+### DNS Cache
+
+```
+  ResolveAddr(network, address)
+       │
+       ├── host is empty or raw IP? ──► skip cache, resolve directly
+       │
+       └── Resolve(network, address)
+               │
+               ├── DNSCacheEntries.Load(address)
+               │       │
+               │       ├── found + not expired ──► return cached addr
+               │       └── found + expired     ──► delete, fall through
+               │
+               ├── net.ResolveTCPAddr + net.ResolveUDPAddr
+               │
+               └── store DnsCacheEntry{TCPAddr, UDPAddr, ExpiredAt=now+DNSCacheTTL}
+                   DNSCacheTTL default = 5m, configurable via dns= param
+```
+
+---
+
+## Master Mode
+
+Master mode runs a REST API server that manages multiple NodePass instances. Each instance is a server or client running as an independent goroutine.
+
+```
+  ┌───────────────────────────────────────────────────────────────────┐
+  │                       Master Mode Architecture                    │
+  │                                                                   │
+  │   API Consumer (curl / dashboard / AI agent)                      │
+  │         │                                                         │
+  │         │  HTTP or HTTPS                                          │
+  │         ▼                                                         │
+  │   ┌───────────────────────────────────────────────┐               │
+  │   │  REST API Server  (optional TLS — same modes) │               │
+  │   │                                               │               │
+  │   │  POST   {prefix}/v1/instances                 │               │
+  │   │  GET    {prefix}/v1/instances                 │               │
+  │   │  GET    {prefix}/v1/instances/{id}            │               │
+  │   │  PATCH  {prefix}/v1/instances/{id}            │               │
+  │   │  DELETE {prefix}/v1/instances/{id}            │               │
+  │   │  GET    {prefix}/v1/events  (SSE stream)      │               │
+  │   │  GET    {prefix}/v1/info                      │               │
+  │   │  GET    {prefix}/v1/openapi.json              │               │
+  │   │  GET    {prefix}/v1/docs   (Swagger UI)       │               │
+  │   └───────────────────┬───────────────────────────┘               │
+  │                       │                                           │
+  │            Instance Registry (in-memory map)                      │
+  │                       │                                           │
+  │          ┌────────────┼────────────┐                              │
+  │          ▼            ▼            ▼                              │
+  │   ┌────────────┐ ┌──────────┐ ┌──────────┐                        │
+  │   │ server://  │ │client:// │ │client:// │  ...                   │
+  │   │ instance A │ │instance B│ │instance C│                        │
+  │   │ (goroutine)│ │(goroutine│ │(goroutine│                        │
+  │   └────────────┘ └──────────┘ └──────────┘                        │
+  │                                                                   │
+  │   MCP 2.0 JSON-RPC endpoint available for AI assistant access     │
+  └───────────────────────────────────────────────────────────────────┘
+```
+
+**Instance lifecycle via API:**
+
+```
+  POST /instances  { "url": "server://:10101/:8080?tls=1" }
+       │
+       ├── Parse URL
+       ├── createCore(parsedURL, logger) → server.NewServer / client.NewClient
+       ├── assign UID
+       ├── store in registry
+       └── go instance.Run()
+
+  PATCH /instances/{id}  { "action": "restart" }
+       │
+       ├── "start"   → go instance.Run()
+       ├── "stop"    → instance.Stop() with ShutdownTimeout
+       └── "restart" → Stop() then go Run()
+
+  GET /events  (SSE)
+       │
+       └── streams instance status changes in real-time
+           event: { id, status, pool, ping, tcps, udps, tcprx, ... }
+```
+
+---
+
+## Full Connection Walkthrough
+
+End-to-end trace for a single TCP connection through a pooled tunnel (`DataFlow "-"`, `tls=1`, `type=0`):
+
+```
+  ① External caller connects to server's target port
+
+  ② Server TunnelTCPLoop:
+       targetConn = TargetListener.Accept()
+       wrap in StatConn (RX/TX counters + rate limiter)
+       DetectBlockProtocol → allowed
+       TryAcquireSlot(false) → TCPSlot++
+       id, remoteConn = TunnelPool.IncomingGet(timeout)
+
+  ③ Server writes signal to control channel:
+       json{ action:"tcp", remote:"1.2.3.4:56789", id:"a3f9c12b" }
+       → XOR(TunnelKey) → Base64 → \n → ControlConn.Write
+
+  ④ Client CommonQueue reads signal:
+       BufReader.ReadBytes('\n') → Decode → json.Unmarshal
+       push Signal to SignalChan
+
+  ⑤ Client CommonOnce dispatches:
+       case "tcp": go TunnelTCPOnce(signal)
+
+  ⑥ Client TunnelTCPOnce:
+       remoteConn = TunnelPool.OutgoingGet("a3f9c12b", timeout)
+       TryAcquireSlot(false) → TCPSlot++
+       targetConn = DialWithRotation("tcp", timeout)
+       SendProxyV1Header (if proxy=1)
+
+  ⑦ Both sides:
+       conn.DataExchange(remoteConn, targetConn, readTimeout, buf1, buf2)
+       bidirectional io.Copy loop until EOF or context cancel
+       defer: remoteConn.Close(), targetConn.Close(), ReleaseSlot
+
+  ⑧ Pool manager refills the consumed slot asynchronously
+
+  Parallel path — control channel health check (every 5s):
+       ping signal ──► peer writes pong ──► logger records:
+       CHECK_POINT | MODE=1 | PING=3ms | POOL=62 | TCPS=1 | UDPS=0 | ...
+```
+
+**Key invariants throughout:**
+- `remoteConn` and `targetConn` are always closed in `defer` — no leaks on early return
+- `TCPSlot` is always released in `defer` paired with `TryAcquireSlot`
+- Pool connection is removed from the map on `OutgoingGet` — one connection, one use
+- `WriteChan` serialises all control writes through a single goroutine — no concurrent writes to `ControlConn`
+
+---
+
+## Buffer and Memory Management
+
+NodePass uses `sync.Pool` for buffer reuse, keeping allocations off the GC hot path under high concurrency.
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  Buffer Pools (one per Common instance)                          │
+  │                                                                  │
+  │  TCPBufferPool  sync.Pool{ New: make([]byte, TCPDataBufSize) }   │
+  │  UDPBufferPool  sync.Pool{ New: make([]byte, UDPDataBufSize) }   │
+  │                                                                  │
+  │  Defaults (overridable via env):                                 │
+  │    NP_TCP_DATA_BUF_SIZE = 16384  (16 KB per TCP exchange)        │
+  │    NP_UDP_DATA_BUF_SIZE = 16384  (16 KB per UDP datagram)        │
+  │                                                                  │
+  │  Lifecycle:                                                      │
+  │    GetTCPBuffer()  → pool.Get() → slice[:TCPDataBufSize]         │
+  │    PutTCPBuffer()  → pool.Put() — only if cap >= TCPDataBufSize  │
+  │                                                                  │
+  │  DataExchange uses two buffers (one per direction):              │
+  │    buf1 := GetTCPBuffer()   // A → B copy buffer                 │
+  │    buf2 := GetTCPBuffer()   // B → A copy buffer                 │
+  │    defer PutTCPBuffer(buf1)                                      │
+  │    defer PutTCPBuffer(buf2)                                      │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+### Environment Tuning Reference
+
+Key runtime constants that can be overridden via environment variables before startup:
+
+```
+  ┌───────────────────────────┬──────────────┬────────────────────────────┐
+  │  Variable                 │  Default     │  Effect                    │
+  ├───────────────────────────┼──────────────┼────────────────────────────┤
+  │  NP_TCP_DATA_BUF_SIZE     │  16384       │  TCP copy buffer bytes     │
+  │  NP_UDP_DATA_BUF_SIZE     │  16384       │  UDP datagram buffer bytes │
+  │  NP_SEMAPHORE_LIMIT       │  65536       │  SignalChan + WriteChan cap│
+  │  NP_HANDSHAKE_TIMEOUT     │  5s          │  Handshake deadline        │
+  │  NP_TCP_DIAL_TIMEOUT      │  5s          │  Target TCP connect limit  │
+  │  NP_UDP_DIAL_TIMEOUT      │  5s          │  Target UDP connect limit  │
+  │  NP_UDP_READ_TIMEOUT      │  30s         │  UDP session idle expiry   │
+  │  NP_POOL_GET_TIMEOUT      │  5s          │  Pool acquisition deadline │
+  │  NP_MIN_POOL_INTERVAL     │  100ms       │  Fastest pool refill rate  │
+  │  NP_MAX_POOL_INTERVAL     │  1s          │  Slowest pool refill rate  │
+  │  NP_REPORT_INTERVAL       │  5s          │  Health check / ping cycle │
+  │  NP_FALLBACK_INTERVAL     │  5m          │  lbs=2 primary reset timer │
+  │  NP_SERVICE_COOLDOWN      │  3s          │  Restart backoff on error  │
+  │  NP_SHUTDOWN_TIMEOUT      │  5s          │  Graceful stop deadline    │
+  │  NP_RELOAD_INTERVAL       │  1h          │  tls=2 cert reload period  │
+  └───────────────────────────┴──────────────┴────────────────────────────┘
+```
+
+---
+
+## Shutdown and Cleanup
+
+Graceful shutdown follows a structured teardown order to avoid data loss and resource leaks:
+
+```
+  SIGINT / SIGTERM received
+       │
+       ├── context.Cancel() — propagates to all goroutines via Ctx
+       │
+       ├── TunnelPool.Close()    — drains and closes all pool connections
+       │
+       ├── TargetUDPSession.Range → close each UDP session conn
+       │
+       ├── TargetUDPConn.Close() — stop accepting UDP datagrams
+       │
+       ├── TunnelUDPConn.Close() — stop UDP tunnel socket
+       │
+       ├── ControlConn.Close()   — disconnect control channel
+       │
+       ├── TargetListener.Close()— stop accepting new target connections
+       │
+       ├── TunnelListener.Close()— stop accepting new tunnel connections
+       │
+       ├── Drain(SignalChan)     — discard queued signals
+       ├── Drain(WriteChan)      — discard queued control writes
+       └── Drain(VerifyChan)     — discard pending verify handshakes
+
+  ShutdownTimeout (default 5s) wraps the above sequence.
+  If exceeded, the process exits regardless of in-flight connections.
+```
+
+---
 
 ## Next Steps
 
-- For practical examples of deploying NodePass, see the [examples page](/docs/examples.md)
-- To fine-tune NodePass for your specific needs, explore the [configuration options](/docs/configuration.md)
-- If you encounter any issues, check the [troubleshooting guide](/docs/troubleshooting.md)
+- [Usage Instructions](/docs/usage.md) — command syntax and parameter reference
+- [Examples](/docs/examples.md) — practical deployment scenarios
+- [Configuration](/docs/configuration.md) — tuning options
+- [Troubleshooting](/docs/troubleshooting.md) — common issues
