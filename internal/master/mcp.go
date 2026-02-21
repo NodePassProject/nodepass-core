@@ -100,7 +100,7 @@ func (m *Master) HandleMCPToolsList(w http.ResponseWriter, req MCPRequest) {
 		},
 		"tls": {
 			"type":        "string",
-			"description": "TLS mode: 0=none, 1=self-signed, 2=custom (server only)",
+			"description": "TLS mode: 0=none, 1=self-signed, 2=custom",
 			"enum":        []string{"0", "1", "2"},
 		},
 		"crt": {

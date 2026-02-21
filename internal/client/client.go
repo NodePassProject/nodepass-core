@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/url"
@@ -17,10 +18,11 @@ import (
 
 type Client struct{ common.Common }
 
-func NewClient(parsedURL *url.URL, logger *logs.Logger) (*Client, error) {
+func NewClient(parsedURL *url.URL, tlsConfig *tls.Config, logger *logs.Logger) (*Client, error) {
 	client := &Client{
 		Common: common.Common{
 			ParsedURL:  parsedURL,
+			TLSConfig:  tlsConfig,
 			Logger:     logger,
 			SignalChan: make(chan common.Signal, common.SemaphoreLimit),
 			WriteChan:  make(chan []byte, common.SemaphoreLimit),
@@ -90,6 +92,9 @@ func (c *Client) Start() error {
 	switch c.RunMode {
 	case "1":
 		if err := c.InitTunnelListener(); err == nil {
+			if c.TLSConfig != nil && c.TunnelListener != nil {
+				c.TunnelListener = tls.NewListener(c.TunnelListener, c.TLSConfig)
+			}
 			return c.SingleStart()
 		} else {
 			return fmt.Errorf("Start: initTunnelListener failed: %w", err)
@@ -99,6 +104,9 @@ func (c *Client) Start() error {
 	default:
 		if err := c.InitTunnelListener(); err == nil {
 			c.RunMode = "1"
+			if c.TLSConfig != nil && c.TunnelListener != nil {
+				c.TunnelListener = tls.NewListener(c.TunnelListener, c.TLSConfig)
+			}
 			return c.SingleStart()
 		} else {
 			c.RunMode = "2"

@@ -52,14 +52,13 @@ func initLogger(level string) *logs.Logger {
 }
 
 func createCore(parsedURL *url.URL, logger *logs.Logger) (interface{ Run() }, error) {
+	tlsCode, tlsConfig := getTLSProtocol(parsedURL, logger)
 	switch parsedURL.Scheme {
 	case "server":
-		tlsCode, tlsConfig := getTLSProtocol(parsedURL, logger)
 		return server.NewServer(parsedURL, tlsCode, tlsConfig, logger)
 	case "client":
-		return client.NewClient(parsedURL, logger)
+		return client.NewClient(parsedURL, tlsConfig, logger)
 	case "master":
-		tlsCode, tlsConfig := getTLSProtocol(parsedURL, logger)
 		return master.NewMaster(parsedURL, tlsCode, tlsConfig, logger, version)
 	default:
 		return nil, fmt.Errorf("createCore: unknown core: %v", parsedURL)
